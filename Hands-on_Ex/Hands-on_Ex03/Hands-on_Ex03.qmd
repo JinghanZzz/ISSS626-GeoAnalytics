@@ -1,0 +1,209 @@
+---
+title: "Hands-on Exercise 3
+-- Chapter 7. Network Constrained Spatial Point Patterns Analysis"
+author: "ZHANG Jinghan"
+date-modified: "last-modified"
+
+execute: 
+  eval: true
+  echo: true
+  message: false
+  freeze: true
+format: 
+  html:
+    code-fold: false
+---
+
+#7.1 Overview
+
+Network constrained Spatial Point Patterns Analysis (NetSPAA) is a collection of spatial point patterns analysis methods special developed for analysing spatial point event occurs on or alongside network. The spatial point event can be locations of traffic accident or childcare centre for example. The network, on the other hand can be a road network or river network.
+
+Appropriate functions of spNetwork package will be used:
+
+to derive network kernel density estimation (NKDE), and to perform network G-function and k-function analysis
+
+#7.2 The Data
+
+In this study, we will analyse the spatial distribution of childcare centre in Punggol planning area. For the purpose of this study, two geospatial data sets will be used. They are:
+
+Punggol_St, a line features geospatial data which store the road network within Punggol Planning Area. Punggol_CC, a point feature geospatial data which store the location of childcare centres within Punggol Planning Area. Both data sets are in ESRI shapefile format.
+
+#7.3 Installing and launching the R packages
+
+In this hands-on exercise, four R packages will be used, they are:
+
+spNetwork, which provides functions to perform Spatial Point Patterns Analysis such as kernel density estimation (KDE) and K-function on network. It also can be used to build spatial matrices (‘listw’ objects like in ‘spdep’ package) to conduct any kind of traditional spatial analysis with spatial weights based on reticular distances. sf package provides functions to manage, processing, and manipulate Simple Features, a formal geospatial data standard that specifies a storage and access model of spatial geometries such as points, lines, and polygons. tmap which provides functions for plotting cartographic quality static point patterns maps or interactive maps by using leaflet API. Use the code chunk below to install and launch the four R packages.
+
+```{r}
+pacman::p_load(sf, spNetwork, tmap, tidyverse)
+```
+
+#7.4 Data Import and Preparation
+
+st_read() of sf package to important Punggol_St and Punggol_CC geospatial data sets into RStudio as sf data frames.
+
+```{r}
+network <- st_read(dsn="data/geospatial", 
+                   layer="Punggol_St")
+```
+
+```{r}
+childcare <- st_read(dsn="data/geospatial",
+                     layer="Punggol_CC") %>%
+  st_zm(drop = TRUE,
+        what = "ZM")
+```
+
+Check data
+
+```{r}
+childcare
+```
+
+```{r}
+network
+```
+
+#7.5 Visualising the Geospatial Data
+
+There are at least two ways to visualise the geospatial data. One way is by using plot() of Base R as shown in the code chunk below.
+
+```{r}
+plot(st_geometry(network))
+plot(childcare,add=T,col='red',pch = 19)
+```
+
+```{r}
+tmap_mode('view')
+tm_shape(childcare) + 
+  tm_dots() + 
+  tm_shape(network) +
+  tm_lines()
+```
+
+```{r}
+tmap_mode('plot')
+```
+
+#7.6 Network KDE (NKDE) Analysis
+
+In this section, we will perform NKDE analysis by using appropriate functions provided in spNetwork package.
+
+##7.6.1 Preparing the lixels objects Before computing NKDE, the SpatialLines object need to be cut into lixels with a specified minimal distance. This task can be performed by using with lixelize_lines() of spNetwork as shown in the code chunk below.
+
+```{r}
+lixels <- lixelize_lines(network, 
+                         700, 
+                         mindist = 375)
+```
+
+The length of a lixel, lx_length is set to 700m, and The minimum length of a lixel, mindist is set to 350m.
+
+After cut, if the length of the final lixel is shorter than the minimum distance, then it is added to the previous lixel. If NULL, then mindist = maxdist/10. Also note that the segments that are already shorter than the minimum distance are not modified
+
+Note: There is another function called lixelize_lines.mc() which provide multicore support.
+
+##7.6.2 Generating line centre points Next, lines_center() of spNetwork will be used to generate a SpatialPointsDataFrame (i.e. samples) with line centre points as shown in the code chunk below.
+
+```{r}
+samples <- lines_center(lixels) 
+```
+
+The points are located at center of the line based on the length of the line.
+
+##7.6.3 Performing NKDE We are ready to computer the NKDE by using the code chunk below.
+
+```{r}
+densities <- nkde(network, 
+                  events = childcare,
+                  w = rep(1, nrow(childcare)),
+                  samples = samples,
+                  kernel_name = "quartic",
+                  bw = 300, 
+                  div= "bw", 
+                  method = "simple", 
+                  digits = 1, 
+                  tol = 1,
+                  grid_shape = c(1,1), 
+                  max_depth = 8,
+                  agg = 5, 
+                  sparse = TRUE,
+                  verbose = FALSE)
+```
+
+```{r}
+densities <- nkde(network, 
+                  events = childcare,
+                  w = rep(1, nrow(childcare)),
+                  samples = samples,
+                  kernel_name = "quartic",
+                  bw = 300, 
+                  div= "bw", 
+                  method = "simple", 
+                  digits = 1, 
+                  tol = 1,
+                  grid_shape = c(1,1), 
+                  max_depth = 8,
+                  agg = 5, 
+                  sparse = TRUE,
+                  verbose = FALSE)
+```
+
+###7.6.3.1 Visualising NKDE
+
+Before we can visualise the NKDE values, code chunk below will be used to insert the computed density values (i.e. densities) into samples and lixels objects as density field.
+
+```{r}
+samples$density <- densities
+lixels$density <- densities
+```
+
+Since svy21 projection system is in meter, the computed density values are very small i.e. 0.0000005. The code chunk below is used to resale the density values from number of events per meter to number of events per kilometer.
+
+```{r}
+# rescaling to help the mapping
+samples$density <- samples$density*1000
+lixels$density <- lixels$density*1000
+```
+
+The code below uses appropriate functions of tmap package to prepare interactive and high cartographic quality map visualisation.
+
+```{r}
+tmap_mode('view')
+tm_shape(lixels)+
+  tm_lines(col="density")+
+tm_shape(childcare)+
+  tm_dots()
+tmap_mode('plot')
+```
+
+#7.7 Network Constrained G- and K-Function Analysis
+
+In this section, we are going to perform complete spatial randomness (CSR) test by using kfunctions() of spNetwork package. The null hypothesis is defined as:
+
+Ho: The observed spatial point events (i.e distribution of childcare centres) are uniformly distributed over a street network in Punggol Planning Area.
+
+The CSR test is based on the assumption of the binomial point process which implies the hypothesis that the childcare centres are randomly and independently distributed over the street network.
+
+If this hypothesis is rejected, we may infer that the distribution of childcare centres are spatially interacting and dependent on each other; as a result, they may form nonrandom patterns.
+
+```{r}
+kfun_childcare <- kfunctions(network, 
+                             childcare,
+                             start = 0, 
+                             end = 1000, 
+                             step = 50, 
+                             width = 50, 
+                             nsim = 50, 
+                             resolution = 50,
+                             verbose = FALSE, 
+                             conf_int = 0.05)
+```
+
+Plot it out
+
+```{r}
+kfun_childcare$plotk
+```
+
+The blue line is the empirical network K-function of the childcare centres in Punggol planning area. The gray envelop represents the results of the 50 simulations in the interval 2.5% - 97.5%. Because the blue line between the distance of 250m-400m are below the gray area, we can infer that the childcare centres in Punggol planning area resemble regular pattern at the distance of 250m-400m.
