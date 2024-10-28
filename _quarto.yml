@@ -2,13 +2,41 @@ project:
   type: website
 
 website:
-  title: "ISSS626-Geospatial Analytics and Applications"
+  title: "ISSS626-Geospatial Analytics"
   navbar:
     left:
       - text: "Hands-on Exercise"
         menu:
-          - text: "Hands-on Exercise 1.1"
-            href: "Hands-onEx/Hans-on_Ex01/Hands-on_Ex1.1.html"
+          - text: "Hands-on Exercise 1"
+            href: "#"
+          - text: "Hands-on Exercise 2"
+          - text: "Hands-on Exercise 3"
+          - text: "Hands-on Exercise 4"
+          - text: "Hands-on Exercise 5"
+          - text: "Hands-on Exercise 6"
+          - text: "Hands-on Exercise 7"
+          - text: "Hands-on Exercise 8"
+          - text: "Hands-on Exercise 9"
+          - text: "Hands-on Exercise 10"
+  
+      - text: "In-class Exercise"
+        menu:
+          - text: "In-class Exercise 01"
+          - text: "In-class Exercise 02"
+          - text: "In-class Exercise 03"
+          - text: "In-class Exercise 04"
+          - text: "In-class Exercise 05"
+          - text: "In-class Exercise 06"
+          - text: "In-class Exercise 07"
+          - text: "In-class Exercise 08"
+          - text: "In-class Exercise 09"
+          - text: "In-class Exercise 10"
+  
+      - text: "Take-home Exercise"
+        menu:
+          - text: "Take-home Exercise 01"
+          - text: "Take-home Exercise 02"
+          - text: "Take-home Exercise 03"
 
     right:
       - href: index.qmd
