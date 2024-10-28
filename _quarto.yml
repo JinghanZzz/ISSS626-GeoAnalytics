@@ -1,19 +1,24 @@
-project:
+project: 
   type: website
 
 website:
-  title: "ISSS626-GeoAnalytics"
+  title: "ISSS626-Geospatial Analytics and Applications"
   navbar:
     left:
+      - text: "Hands-on Exercise"
+        menu:
+          - text: "Hands-on Exercise 1.1"
+            href: "Hands-onEx/Hans-on_Ex01/Hands-on_Ex1.1.html"
+
+    right:
       - href: index.qmd
         text: Home
       - about.qmd
 
 format:
   html:
-    theme: cosmo
+    theme: morph
     css: styles.css
     toc: true
 
 editor: visual
-
