@@ -23,7 +23,7 @@ body {
 }
 
 .navbar a {
-    color: #fff; /* 所有导航链接设为白色 */
+    color: #ffccd5; /* 所有导航链接设为白色 */
     text-decoration: none;
     padding: 14px 20px;
     display: inline-block;
@@ -179,3 +179,11 @@ footer a:hover {
         padding: 15px;
     }
 }
+
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+

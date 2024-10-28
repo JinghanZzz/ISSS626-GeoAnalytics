@@ -13,3 +13,5 @@ format:
 Welcome to **ISSS626 Geospatial Analytics and Applications**. In this website you will find my coursework prepared for this course
 
 (Republished on Oct 28, 2024)
+
+![](https://i2-prod.mirror.co.uk/incoming/article6196179.ece/ALTERNATES/s810/MAINearth.jpg)
