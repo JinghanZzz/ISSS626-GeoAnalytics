@@ -1,0 +1,126 @@
+---
+title: "In-class_Ex02"
+author: "ZHANG Jinghan"
+date: "Aug 26 2024"
+date-modified: "last-modified"
+execute:
+  eval: true
+  echo: true
+  message: false
+  freeze: true
+---
+
+Installing maptools
+
+```{r}
+#| eval: false # avoid repetitivly download maptool
+install.packages("maptools",repos = "https://packagemanager.posit.co/cran/2023-10-13")
+```
+
+```{r}
+pacman::p_load(sf, raster, spatstat, tmap, tidyverse)
+```
+
+```{r}
+childcare_sf <- st_read("data/child-care-services-geojson.geojson") %>%
+  st_transform(crs = 3414)
+```
+
+```{r}
+sg_sf <- st_read(dsn = "data", layer="CostalOutline")
+```
+
+```{r}
+mpsz_sf <- st_read(dsn = "data", 
+                layer = "MP14_SUBZONE_WEB_PL")
+```
+
+#把好几个图的信息重叠在一起 st_union
+
+```{r}
+sg_sf <-mpsz_sf %>%
+  st_union
+```
+
+```{r}
+childcare_ppp <- as.ppp(childcare_sf)
+plot(childcare_ppp)
+```
+
+```{r}
+summary(childcare_ppp)
+```
+
+```{r}
+sg_owin <- as.owin(sg_sf)
+plot(sg_owin)
+```
+
+```{r}
+summary(sg_owin)
+```
+
+```{r}
+childcareSG_ppp = childcare_ppp[sg_owin]
+```
+
+```{r}
+plot(childcareSG_ppp)
+```
+
+```{r}
+childcareSG_ppp.km <- rescale.ppp(childcareSG_ppp, 
+                                  1000, 
+                                  "km")
+
+kde_childcareSG_adaptive <- adaptive.density(
+  childcareSG_ppp.km, 
+  method="kernel")
+plot(kde_childcareSG_adaptive)
+```
+
+```{r}
+par(bg = '#E4D5C9')
+
+gridded_kde_childcareSG_ad <- maptools::as.SpatialGridDataFrame.im(
+  kde_childcareSG_adaptive)
+spplot(gridded_kde_childcareSG_ad)
+```
+
+```{r}
+gridded_kde_childcareSG_ad <- as(
+  kde_childcareSG_adaptive,
+  "SpatialGridDataFrame")
+spplot(gridded_kde_childcareSG_ad)
+```
+
+```{r}
+pg_owin <- mpsz_sf %>%
+  filter(PLN_AREA_N == "PUNGGOL") %>%
+  as.owin()
+
+childcare_pg = childcare_ppp[pg_owin]
+
+plot(childcare_pg)  
+```
+
+```{r}
+set.seed(1234)
+```
+
+#后面的经纬度有NA，不filter掉跑不动
+
+#Preparation for Take-home01
+
+```{r}
+#rdacc_sf <- read_csv("C:/JinghanZzz/ISSS608-VAA/In-class_Ex/In-class_Ex02/data/thai_road_accident_2019_2022.csv") %>%
+#  filter(!is.na(longitude) & longitude != "",
+#         !is.na(latitude) & latitude != "") %>%
+#  st_as_sf(coords = c("longitude", "latitude"),
+#           crs = 4326) %>%
+#  st_transform(crs = 32647)   #早点做st transformation，不然后面都是小数
+```
+
+```{r}
+#rdacc_sf <- read_csv("data/thai_road_accident_2019_2022.csv") %>% #filter(!is.na(longitude) & longitude != "", !is.na(latitude) & latitude != "") %>% st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>% st_transform(crs = 32647)
+```

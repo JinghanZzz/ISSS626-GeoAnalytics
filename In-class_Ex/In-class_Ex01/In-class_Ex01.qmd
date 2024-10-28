@@ -1,0 +1,123 @@
+---
+title: "In-class-Exercise 1"
+author: "ZHANG Jinghan"
+date: "Aug 20 2024"
+date-modified: "last-modified"
+execute:
+  eval: true
+  echo: true
+  message: false
+  freeze: true
+---
+
+```         
+```
+
+### The code
+
+p3
+
+```{r}
+pacman::p_load(sf, tidyverse, tmap, ggstatsplot)
+```
+
+p4
+
+```{r}
+mpsz14_shp <- st_read(dsn = "data/",
+                layer = "MP14_SUBZONE_WEB_PL")
+```
+
+```{r}
+mpsz14_kml <- st_read("data/MasterPlan2014SubzoneBoundaryWebKML.kml")
+```
+
+05
+
+```{r}
+st_write(mpsz14_shp, 
+         "data/MP14_SUBZONE_WEB_PL.kml",
+         delete_dsn = TRUE)
+```
+
+06 import Pre-Schools Location in kml geojson save them in sf simple features data frame.
+
+```{r}
+preschool_kml <- st_read("data/PreSchoolsLocation.kml")
+```
+
+```{r}
+preschool_geojson <- st_read("data/PreSchoolsLocation.geojson") 
+```
+
+07
+
+```{r}
+mpsz19_shp <- st_read(dsn = "data/",
+                layer = "MPSZ-2019")
+```
+
+```{r}
+mpsz19_kml <- st_read("data/MasterPlan2019SubzoneBoundaryNoSeaKML.kml")
+```
+
+08 Checking coordinate system of sf project
+
+```{r}
+st_crs(mpsz19_shp)
+```
+
+09 Transformation Re-write the code chunk to import the Master Plan Sub-zone 2019 and Pre-schools Location with proper transformation
+
+```{r}
+mpsz19_shp <- st_read(dsn = "data/",
+                layer = "MPSZ-2019") %>%
+  st_transform(crs = 3414)
+```
+
+```{r}
+preschool <- st_read("data/PreSchoolsLocation.kml") %>%
+  st_transform(crs = 3414)
+```
+
+##Geospatial Data Wragling 10 Point-in-Polygon count count the number of pre-schools in each planning sub-zone.
+
+```{r}
+mpsz19_shp <- mpsz19_shp %>%
+  mutate(`PreSch Count` = lengths(
+    st_intersects(mpsz19_shp, preschool)))
+```
+
+11 Compute density
+
+```{r}
+mpsz19_shp <- mpsz19_shp %>%
+  mutate(Area = units::drop_units(
+    st_area(.)),
+    `PreSch Density` = `PreSch Count` / Area * 1000000
+  )
+```
+
+##Statistical Analysis 12 EDA and CDA Confirmatory Data Analysis Tip: Refer to ggscatterstats() of ggstatsplot package. ###\`\``{r} mpsz$`PreSch Density`<- as.numeric(as.character(mpsz19_shp$`PreSch Density`)) mpsz$`PreSch Count`<- as.numeric(as.character(mpsz19_shp$`PreSch Count\`)) mpsz19_shp \<- as.data.frame(mpsz19_shp)
+
+ggscatterstats(data = mpsz19_shp, x = `PreSch Density`, y = `PreSch Count`, type = "parametric") ###\`\`\`
+
+```{r}
+popdata <- read_csv("data/respopagesextod2023.csv")
+```
+
+#! output: false st_write(mpsz14_shp, "data/MasterPlan2014SubzoneBoundaryWebKML.kml", delete_dsn = TRUE)
+
+```{r}
+mpsz19_kml = st_read("C:/ISSS626-AY2024-25Aug/data/geospatial/MasterPlan2019SubzoneBoundaryNoSeaKML.kml")
+```
+
+```{r}
+mpsz19_shp = st_read("C:/ISSS626-AY2024-25Aug/data/geospatial/MasterPlan2019SubzoneBoundaryNoSeaGEOJSON.geojson")
+```
+
+```{r}
+mpsz19_shp <- st_read(dsn = "C:/ISSS626-AY2024-25Aug/data/geospatial",
+                      layer = "MPSZ-2019")%>%
+  st_transform(crs=3414)
+```

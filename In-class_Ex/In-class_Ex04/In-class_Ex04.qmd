@@ -1,0 +1,253 @@
+---
+title: "In-Class_Ex04"
+author: "ZHANG Jinghan"
+date: "Sep 16 2024"
+date-modified: "last-modified"
+execute:
+  eval: true
+  echo: true
+  message: false
+  freeze: true
+---
+
+Import package
+
+```{r}
+pacman::p_load(sf,dplyr,ggstatsplot,tmap,tidyverse,knitr,GWmodel)
+```
+
+Import data
+
+```{r}
+hunan_sf <- st_read(dsn = "data/geospatial",
+                    layer = "Hunan")
+```
+
+```{r}
+hunan2012 <- read_csv("data/aspatial/Hunan_2012.csv")
+```
+
+Append attribute to geo data
+
+```{r}
+hunan_sf <- left_join(hunan_sf, hunan2012) %>%
+  dplyr::select(1:3, 7, 15, 16, 31, 32)
+
+```
+
+Plot a choropleth map showing the geographic distribution of GDPPC of Hunan Province.
+
+```{r}
+basemap <- tm_shape(hunan_sf) +
+  tm_polygons() +
+  tm_text("NAME_3", size=0.5)
+
+gdppc <- qtm(hunan_sf, "GDPPC")
+tmap_arrange(basemap, gdppc, asp=1, ncol=2)
+```
+
+```{r}
+hunan_sp <- hunan_sf %>%
+  as_Spatial()
+```
+
+Geographically Weighted Summary Statistics with adaptive bandwidth Determine adaptive bandwidth
+
+Cross validatioin
+
+```{r}
+bw_CV <- bw.gwr(GDPPC ~ 1,
+                data = hunan_sp,
+                approach = "CV",
+                adaptive = TRUE,
+                kernel = "bisquare",
+                longlat = T)
+```
+
+AIC
+
+```{r}
+bw_AIC <- bw.gwr(GDPPC ~ 1, 
+             data = hunan_sp,
+             approach ="AIC",
+             adaptive = TRUE, 
+             kernel = "bisquare", 
+             longlat = T)
+```
+
+Computing geographically wieghted summary statistics
+
+```{r}
+gwstat <- gwss(data = hunan_sp,
+               vars = "GDPPC",
+               bw = bw_AIC,
+               kernel = "bisquare",
+               adaptive = TRUE,
+               longlat = T)
+```
+
+Code chunk below is used to extract SDF data table from gwss object output from gwss(). It will be converted into data.frame by using as.data.frame().
+
+```{r}
+gwstat_df <- as.data.frame(gwstat$SDF)
+```
+
+Next, cbind() is used to append the newly derived data.frame onto hunan_sf sf data.frame.
+
+```{r}
+hunan_gstat <- cbind(hunan_sf, gwstat_df)
+```
+
+p9
+
+```{r}
+tm_shape(hunan_gstat) +
+  tm_fill("GDPPC_LM",
+          n = 5,
+          style = "quantile") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(main.title = "Distribution of geographically wieghted mean",
+            main.title.position = "center",
+            main.title.size = 2.0,
+            legend.text.size = 1.2,
+            legend.height = 1.50, 
+            legend.width = 1.50,
+            frame = TRUE)
+```
+
+Determine fixed bandwidth
+
+```{r}
+ bw_CV <- bw.gwr(GDPPC ~ 1, 
+             data = hunan_sp,
+             approach = "CV",
+             adaptive = FALSE, 
+             kernel = "bisquare", 
+             longlat = T)
+```
+
+AIC
+
+```{r}
+bw_AIC <- bw.gwr(GDPPC ~ 1, 
+             data = hunan_sp,
+             approach ="AIC",
+             adaptive = FALSE, 
+             kernel = "bisquare", 
+             longlat = T)
+```
+
+Computing adaptive bandwidth
+
+```{r}
+gwstat <- gwss(data = hunan_sp,
+               vars = "GDPPC",
+               bw = bw_AIC,
+               kernel = "bisquare",
+               adaptive = FALSE,
+               longlat = T)
+```
+
+Preparing the output data Code chunk below is used to extract SDF data table from gwss object output from gwss(). It will be converted into data.frame by using as.data.frame(). 先把weight转成dataframe，然后append回去
+
+```{r}
+gwstat_df <- as.data.frame(gwstat$SDF)
+```
+
+```{r}
+gwstat_df <- as.data.frame(gwstat$SDF)
+```
+
+Plot out weighted mean
+
+```{r}
+tm_shape(hunan_gstat) +
+  tm_fill("GDPPC_LM",
+          n = 5,
+          style = "quantile") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(main.title = "Distribution of geographically wieghted mean",
+            main.title.position = "center",
+            main.title.size = 2.0,
+            legend.text.size = 1.2,
+            legend.height = 1.50, 
+            legend.width = 1.50,
+            frame = TRUE)
+```
+
+然后做统计检验
+
+```{r}
+ggscatterstats(
+  data = hunan2012, 
+  x = Agri, 
+  y = GDPPC,
+  xlab = "Gross Agriculture Output", ## label for the x-axis
+  ylab = "GDP per capita", 
+  label.var = County, 
+  label.expression = Agri > 10000 & GDPPC > 50000, 
+  point.label.args = list(alpha = 0.7, size = 4, color = "grey50"),
+  xfill = "#CC79A7", 
+  yfill = "#009E73", 
+  title = "Relationship between GDP PC and Gross Agriculture Output")
+```
+
+## Geographically Weighted Correlation with Adaptive Bandwidth
+
+Geospatial analytics solution
+
+上面那个是固定带宽，这个是adaptive带宽，就是如果很密集就少一点邻居，很disperse就多一点邻居，这样大家都有足够的邻居用来做回归 Determine the bandwidth
+
+```{r}
+bw <- bw.gwr(GDPPC ~ GIO, 
+             data = hunan_sp, 
+             approach = "AICc", 
+             adaptive = TRUE)
+```
+
+Computing gwCorrelation 看看这些地方有多相关
+
+先算 捞出来 转df，append上去，visualise
+
+```{r}
+gwstats <- gwss(hunan_sp, 
+                vars = c("GDPPC", "GIO"), 
+                bw = bw,
+                kernel = "bisquare",
+                adaptive = TRUE, 
+                longlat = T)
+```
+
+Code chunk below is used to extract **SDF** data table from **gwss** object output from `gwss()`. It will be converted into data.frame by using `as.data.frame()`.
+
+```{r}
+gwstat_df <- as.data.frame(gwstats$SDF) %>%
+  dplyr::select(c(12, 13)) %>%
+  dplyr::rename(gwCorr = Corr_GDPPC.GIO,
+                gwSpearman = Spearman_rho_GDPPC.GIO)
+
+```
+
+
+Next, `cbind()` is used to append the newly derived data.frame onto *hunan_sf* sf data.frame.
+
+```{r}
+hunan_Corr <- cbind(hunan_sf, gwstat_df)
+```
+
+Plot出来local correlation coefficient和local spearman coefficient
+
+```{r}
+tm_shape(hunan_Corr) +
+  tm_fill("gwSpearman",
+          n = 5,
+          style = "quantile") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(main.title = "Local Spearman Rho",
+            main.title.position = "center",
+            main.title.size = 2.0,
+            legend.text.size = 1.2,
+            legend.height = 1.50, 
+            legend.width = 1.50,
+            frame = TRUE)
+```

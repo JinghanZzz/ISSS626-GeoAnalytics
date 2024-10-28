@@ -33,9 +33,12 @@ website:
       - text: "In-class Exercise"
         menu:
           - text: "In-class Exercise 01"
+            href: "In-class_Ex/In-class_Ex01/In-class_Ex01.qmd"          
           - text: "In-class Exercise 02"
+            href: "In-class_Ex/In-class_Ex02/In-class_Ex02.qmd"
           - text: "In-class Exercise 03"
           - text: "In-class Exercise 04"
+            href: "In-class_Ex/In-class_Ex04/In-class_Ex04.qmd"
           - text: "In-class Exercise 05"
           - text: "In-class Exercise 06"
           - text: "In-class Exercise 07"
