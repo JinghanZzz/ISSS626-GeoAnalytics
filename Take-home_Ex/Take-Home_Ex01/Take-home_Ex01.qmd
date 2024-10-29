@@ -1,0 +1,959 @@
+---
+title: "Take-home Exercise 1"
+author: "ZHANG Jinghan"
+date: "September 9,2024"
+date-modified: "last-modified"
+excute:
+  eval: False
+  echo: true
+  freeze: true
+  warning: false
+  message: false
+
+---
+
+```{r}
+pacman::p_load(sf, tidyverse, tmap, spNetwork, ggstatsplot)
+```
+
+#01Data
+##1.1 Thai Road Accident Data Read in CSV file containing
+road accident data in Thailand (2019-2022). Extract month and day of the
+week from the incident datetime, remove rows with missing coordinates,
+convert the data into a spatial (sf) object, and transform the
+coordinate reference system to UTM Zone 47N.
+
+```{r}
+#| eval: false
+acc <- read_csv("data/rawdata/thai_road_accident_2019_2022.csv") %>%
+  mutate(Month_num = month(incident_datetime)) %>%
+  mutate(Month_fac = month(incident_datetime,
+                       label = TRUE,
+                       abbr = TRUE)) %>%
+  mutate(dayofweek = weekdays(incident_datetime))%>%
+  filter(!is.na(longitude) & !is.na(latitude)) %>%  # Remove rows with missing coordinates
+  st_as_sf(coords = c("longitude", "latitude"),
+                       crs=4326) %>%
+  st_transform(crs = 32647)
+```
+
+Save to a rds file
+
+```{r}
+#| eval: false
+write_rds(acc, "data//acc.rds")
+```
+
+Read the processed rds file in again
+
+```{r}
+#| eval: false
+acc <- read_rds("data/acc.rds")
+```
+
+We only need metropolitan region (BMR), so filter them out
+
+```{r}
+#| eval: false
+bmr_provinces <- c("Bangkok", "Nakhon Pathom", "Pathum Thani", "Nonthaburi", "Samut Prakan", "Samut Sakhon")
+
+bmr_acc_data <- acc %>%
+  filter(province_en %in% bmr_provinces)
+```
+
+Write filtered data in a file
+
+```{r}
+#| eval: false
+write_rds(bmr_acc_data,"data/bmr_acc_data.rds")
+```
+
+Read in the filtered file
+
+```{r}
+bmr_acc_data <- read_rds("data/bmr_acc_data.rds")
+```
+
+##1.2 Thai Road data
+
+```{r}
+#| eval: false
+# Read the shapefile using relative path
+roads <- st_read(dsn = "data/rawdata/hotosm_tha_roads_lines_shp", layer = "hotosm_tha_roads_lines_shp")
+```
+
+##1.3 Admin Boundary Data Read in admin boundary data1
+
+```{r}
+#| eval: false
+admin_boundaries <- st_read(dsn = "data/rawdata/tha_adm_rtsd_itos_20210121_shp", layer = "tha_admbnda_adm1_rtsd_20220121")
+```
+
+Filter out BMR boundary from the data set
+
+```{r}
+#| eval: false
+bmr_provinces <- c("Bangkok", "Nakhon Pathom", "Pathum Thani", "Nonthaburi", "Samut Prakan", "Samut Sakhon")
+
+# Filter out Bangkok Metropolitan Region (BMR)'s boundary
+bmr_boundary <- admin_boundaries %>%
+  filter(ADM1_EN %in% bmr_provinces)
+
+head(bmr_boundary)
+```
+
+Write it in a file and read it back in
+
+```{r}
+#| eval: false
+write_rds(bmr_boundary, "data/bmr_boundary.rds")
+```
+
+```{r}
+#| eval: false
+bmr_boundary <- read_rds("data/bmr_boundary.rds")
+```
+
+Transform the data to WGS84 crs 4326
+```{r}
+#| eval: false
+roads <- st_transform(roads, crs = 4326)
+```
+
+Filter road in bmr boundary
+```{r}
+#| eval: false
+bmr_roads <- st_intersection(roads,
+bmr_boundary)
+
+#Save intersection of bmr1 and roadto a file
+write_rds(bmr_roads, "data/bmr_roads.rds")
+```
+
+#02 Analysis of the distribution of Car Accidents among Thailand
+ ---- 1st Order Spatial Point Pattern Analysis
+
+```{r}
+pacman::p_load(sf, raster, spatstat, tmap, tidyverse)
+```
+
+##2.1 Prepare Data
+Check if datasets are in the same projection system
+
+```{r}
+# Load necessary libraries
+library(sf)
+
+# Load the RDS datasets from the correct relative paths
+bmr_acc_data <- readRDS("data/bmr_acc_data.rds")
+bmr_boundary <- readRDS("data/bmr_boundary.rds")
+bmr_roads <- readRDS("data/bmr_roads.rds")
+
+# Check the CRS of each dataset
+
+cat("BMR Accident Data CRS:\n")
+print(st_crs(bmr_acc_data))
+
+cat("BMR Boundary CRS:\n")
+print(st_crs(bmr_boundary))
+
+cat("BMR Roads CRS:\n")
+print(st_crs(bmr_roads))
+
+```
+
+Transform the accident data and BMR accident data to EPSG:32647
+
+```{r}
+# Transform BMR accident data and BMR boundary to EPSG:32647 (UTM Zone 47N)
+bmr_acc_data <- st_transform(bmr_acc_data, crs = 32647)
+bmr_boundary <- st_transform(bmr_boundary, crs = 32647)
+
+# Check CRS to ensure correct projection
+cat("BMR Accident Data CRS:\n")
+print(st_crs(bmr_acc_data))
+
+cat("BMR Boundary CRS:\n")
+print(st_crs(bmr_boundary))
+```
+
+```{r}
+# Load necessary libraries
+library(sf)
+library(tmap)
+
+# Base R plot (Simple)
+plot(st_geometry(bmr_boundary), col = "lightgrey", border = "black", main = "BMR Accident Locations (Base R)")
+
+# Add the accident points on top of the boundary map with smaller dots
+plot(st_geometry(bmr_acc_data), col = "black", pch = 19, cex = 0.1, add = TRUE)  # Adjust point size using cex
+
+# tmap version (More flexible visualization)
+tm_shape(bmr_boundary) +
+  tm_borders(col = "black", lwd = 1) +  # Plot boundary with black borders
+  tm_shape(bmr_acc_data) +
+  tm_dots(col = "black", size = 0.01) +  # Adjust dot size using size = 0.05
+  tm_layout(title = "BMR Accident Locations (tmap)")
+
+```
+
+##2.2  Comvert data to ppp
+Convert sf to sp
+```{r}
+# Load necessary libraries
+library(sf)
+library(sp)
+
+# Convert BMR accident data from sf to sp class
+bmr_acc_data_sp <- as_Spatial(bmr_acc_data)
+
+# Convert BMR boundary from sf to sp class
+bmr_boundary_sp <- as_Spatial(bmr_boundary)
+
+# Check the class of the converted objects to ensure they are now Spatial* objects
+class(bmr_acc_data_sp)
+class(bmr_boundary_sp)
+```
+
+```{r}
+# Extract the coordinates (longitude and latitude) from SpatialPoints
+acc_coords <- coordinates(bmr_acc_data_sp)  # Using the correct variable 'bmr_acc_sp'
+
+# Extract the bounding box from the BMR boundary
+bbox_values <- bbox(bmr_boundary_sp)  # Using the correct variable 'bmr_boundary_sp_generic'
+
+# Manually create the observation window (owin) using the bounding box
+bmr_window <- owin(xrange = c(bbox_values[1, 1], bbox_values[1, 2]), 
+                   yrange = c(bbox_values[2, 1], bbox_values[2, 2]))
+
+# Convert the coordinates to a ppp object for spatstat
+bmr_acc_ppp <- ppp(x = acc_coords[, 1], y = acc_coords[, 2], window = bmr_window)
+
+# Display the ppp object
+bmr_acc_ppp
+
+# Plot the ppp object with smaller points
+plot(bmr_acc_ppp, main = "BMR Accident Locations", cex = 0.5)  # Adjust 'cex' for smaller points
+
+```
+
+##2.3 Handling Duplicate Points
+
+```{r}
+any(duplicated(bmr_acc_ppp))
+```
+
+Show points with Duplicate
+
+```{r}
+multiplicity(bmr_acc_ppp)
+```
+
+Check how many points have duplicates
+```{r}
+sum(multiplicity(bmr_acc_ppp) > 1)
+```
+
+```{r}
+# Check if there are any duplicate points
+any(duplicated(bmr_acc_ppp))
+
+# Count how many points have duplicates
+sum(duplicated(bmr_acc_ppp))
+
+# Check the total number of points in the dataset
+total_points <- npoints(bmr_acc_ppp)
+
+# Calculate the percentage of duplicates
+duplicate_percentage <- (sum(duplicated(bmr_acc_ppp)) / total_points) * 100
+
+# Print the results
+print(paste("Total points:", total_points))
+print(paste("Number of duplicates:", sum(duplicated(bmr_acc_ppp))))
+print(paste("Percentage of duplicates:", duplicate_percentage))
+
+```
+
+```{r}
+# Extract the coordinates from the ppp object
+acc_coords <- coords(bmr_acc_ppp)
+
+# Convert the coordinates to a data frame for easier handling
+acc_coords_df <- as.data.frame(acc_coords)
+
+# Find the unique rows (unique locations)
+unique_locations <- unique(acc_coords_df)
+
+# Count how many unique locations there are
+num_unique_locations <- nrow(unique_locations)
+
+# Print the result
+print(paste("Total unique locations:", num_unique_locations))
+
+```
+
+We rjitter to deal with duplicates
+
+```{r}
+# Apply jittering to the BMR accident point pattern (ppp object)
+# nsim = 1 means one simulation, retry = TRUE retries jittering if a point overlaps
+# drop = TRUE ensures any points that fall outside the window are dropped
+bmr_acc_ppp_jit <- rjitter(bmr_acc_ppp, retry = TRUE, nsim = 1, drop = TRUE)
+
+# Plot the jittered points with smaller size
+plot(bmr_acc_ppp_jit, main = "Jittered BMR Accident Locations", cex = 0.5)  # Adjust 'cex' for smaller points
+```
+
+Check if there anymore duplicates--no
+
+```{r}
+any(duplicated(bmr_acc_ppp_jit))
+```
+
+##2.4 Combine point events object and owin object
+```{r}
+# Combine jittered BMR accident data with the BMR boundary (owin object)
+bmr_acc_ppp_final <- bmr_acc_ppp_jit[bmr_window]
+
+# Display summary information of the combined ppp object
+summary(bmr_acc_ppp_final)
+
+# Plot the combined ppp object with smaller points
+plot(bmr_acc_ppp_final, main = "Jittered BMR Accident Locations Within BMR Boundary", cex = 0.5)
+```
+##2.5 Compute kernel density
+-- Computing kernel density estimation using automatic bandwidth selection method
+```{r}
+# Load spatstat if needed
+library(spatstat)
+
+# Compute kernel density estimation with automatic bandwidth selection (bw.diggle)
+kde_bmr_acc <- density(bmr_acc_ppp_final,  # Use the final ppp object after jittering and combining with owin
+                       sigma = bw.diggle(bmr_acc_ppp_final),  # Automatic bandwidth selection
+                       edge = TRUE,  # Correct for edge effects
+                       kernel = "gaussian")  # Use gaussian kernel (default)
+
+# Plot the kernel density estimation
+plot(kde_bmr_acc, main = "Kernel Density Estimation of BMR Accident Data (bw.diggle)")
+
+```
+
+The bandwidth is too small to observe the pattern, so we check the parameter and tune it
+
+Adjust sigma without rescalling and Compute the KDE
+```{r} 
+# Load spatstat if needed
+library(spatstat)
+
+# Define a custom value for sigma (in meters, since data is in UTM projection)
+sigma_value <- 12000  # Adjust this value based on your smoothing preference
+
+# Compute kernel density estimation with manual sigma
+kde_bmr_acc <- density(bmr_acc_ppp_final,  # Use the final ppp object after jittering and combining with owin
+                       sigma = sigma_value,  # Use custom sigma value (in meters)
+                       edge = TRUE,  # Correct for edge effects
+                       kernel = "gaussian")  # Use gaussian kernel (default)
+
+# Plot the kernel density estimation
+plot(kde_bmr_acc, main = paste("Kernel Density Estimation of BMR Accident Data (sigma =", sigma_value, "meters)"))
+
+# Optionally add the boundary if needed (to show BMR region)
+plot(bmr_boundary_sp, add = TRUE, border = "white", lwd = 2)  # Adjust line width and color as needed
+
+```
+This image shows a Kernel Density Estimation (KDE) of road accidents in the Metropolitan Region of Thailand with a sigma of 4000 meters. The yellow areas, especially in the Bangkok, represent regions with the highest number of accidents, indicating high accident frequency. We will zoom in to Bangkok to further study the pattern of car accidents in more detail.
+
+#03 Network Spatial Point Patterns Analysis of Bangkok --NKDE
+##3.1 Data
+
+```{r}
+pacman::p_load(sf, spNetwork, tmap, tidyverse)
+```
+
+Read in BMR Data```
+```{r}
+# Load required libraries
+library(sf)   # For spatial data manipulation
+library(dplyr) # For data manipulation
+
+# Define the file paths for the RDS files in the 'data/' directory
+file_acc <- "data/bmr_acc_data.rds"
+file_boundary <- "data/bmr_boundary.rds"
+file_roads <- "data/bmr_roads.rds"
+
+# Read in the .rds files
+bmr_acc_data <- readRDS(file_acc)
+bmr_boundary <- readRDS(file_boundary)
+bmr_roads <- readRDS(file_roads)
+
+# Transform to EPSG:32647 (WGS 84 / UTM zone 47N)
+bmr_acc_data <- st_transform(bmr_acc_data, crs = 32647)
+bmr_boundary <- st_transform(bmr_boundary, crs = 32647)
+bmr_roads <- st_transform(bmr_roads, crs = 32647)
+```
+
+
+###3.1.1 Accident
+Filter Bangkok accident data and save to a rds at data/
+```{r}
+#| eval: false
+bkk_acc <- bmr_acc_data %>%
+  filter(province_en == "Bangkok")
+saveRDS(bkk_acc, file = "data/bkk_acc.rds")
+```
+
+###3.1.2 Boundary
+Filter main roads in Bangkok. Here we take roads tagged as "motorway", "trunk", "primary", "secondary" in to our study and ignored less important roads like pathway, sidewalk and so on. The purpose here is to 
+
+Read in adm2(city level) boundary and transform to 32647
+```{r}
+thai_boundary2 <- st_read(dsn ="data/rawdata/tha_adm_rtsd_itos_20210121_shp",
+                         layer = "tha_admbnda_adm2_rtsd_20220121")
+thai_boundary2 <- st_transform(thai_boundary2, crs = 32647)
+```
+
+Filter BKK boundary and save to rds
+```{r}
+#adm1--province level
+bkk_boundary <- bmr_boundary %>% 
+  filter(ADM1_EN == "Bangkok")
+
+#admi2--city level
+bkk_boundary2 <- thai_boundary2 %>% 
+  filter(ADM1_EN == "Bangkok")
+
+#Save to rds
+saveRDS(bkk_boundary, file = "data/bkk_boundary.rds")
+saveRDS(bkk_boundary2, file = "data/bkk_boundary2.rds")
+```
+
+
+###3.1.3 Roads
+We have intersected bmr and thai road in previous part. In this part we will intersect
+
+
+Filter main roads in Bangkok
+```{r}
+bmr_roads <- bmr_roads %>%
+  filter(highway %in% c("motorway", "trunk", "primary", "secondary"))
+
+bkk_roads <- bmr_roads %>%
+  filter(ADM1_EN == "Bangkok")
+
+saveRDS(bkk_roads,"data/bkk_roads.rds")
+```
+
+###3.1.4 Intersection Bangkok road with Bangkok boundary
+
+First we need to read back bkk data and unify the crs to 32647
+```{r}
+bkk_acc <- readRDS("data/bkk_acc.rds")
+bkk_boundary <- readRDS("data/bkk_boundary.rds")
+bkk_boundary2 <- readRDS("data/bkk_boundary2.rds")
+bkk_roads <- readRDS("data/bkk_roads.rds")
+
+# Transform to EPSG 32647 (WGS 84 / UTM zone 47N)
+bkk_acc <- st_transform(bkk_acc, crs = 32647)
+bkk_boundary <- st_transform(bkk_boundary, crs = 32647)
+bkk_boundary2 <- st_transform(bkk_boundary2, crs = 32647)
+bkk_roads <- st_transform(bkk_roads, crs = 32647)
+```
+
+Intersect road with boundary
+```{r}
+bkk_roads_intersection <- st_intersection(bkk_roads, bkk_boundary)
+saveRDS(bkk_roads_intersection, file = "data/bkk_roads_intersec.rds")
+```
+Read it back in and transform to 32647
+```{r}
+bkk_roads_intersec <- readRDS("data/bkk_roads_intersec.rds")
+
+# Transform the coordinate reference system to EPSG 32647 (WGS 84 / UTM zone 47N)
+bkk_roads_intersec <- st_transform(bkk_roads_intersec, crs = 32647)
+```
+
+
+```{r}
+print(bkk_roads_intersec)
+```
+
+##3.2 Linestring formatting of data
+
+Filter out linestring and multilinestring geometry
+```{r}
+bkk_roads_intersec <- bkk_roads_intersec %>%
+  filter(st_geometry_type(bkk_roads_intersec) %in% c("LINESTRING", "MULTILINESTRING"))
+```
+
+Transform MULTILINESTRING to LINESTRING
+```{r}
+bkk_roads_intersec <- st_cast(bkk_roads_intersec, "LINESTRING", group_or_split = TRUE)
+```
+Check wether is has been successfully transformed to LINESTRING
+```{r}
+st_geometry_type(bkk_roads_intersec)
+```
+Check format of geometry (should be Linestring)
+```{r}
+library(dplyr)
+# Get the geometry types and summarize their counts
+geometry_summary <- bkk_roads_intersec %>%
+  st_geometry_type() %>%
+  table()
+
+print(geometry_summary)
+```
+##3.3 Lixel
+Generate lixels and samples for road in Bangkok
+
+Since major roads are expected to be long, so we set para to 10,000 and mindist to 5000
+```{r}
+# 假设高速公路路段较长，选择 5000 米的 lixel 单元
+bkk_lixels <- lixelize_lines(bkk_roads_intersec,
+                         10000,        # 5000 米的 lixel 单元
+                         mindist = 5000)  # 最小距离设置为 5000 米
+```
+
+
+Generate sample points using lines_centre
+```{r}
+#use centre of each lixel for lines_centre
+bkk_samples <- lines_center(bkk_lixels)
+```
+
+##3.4 NKDE
+Calculate NKDE for Bangkok
+```{r}
+#| eval: false
+# Ensure acc_in_bangkok is an sf object with valid geometries
+bkk_acc <- st_as_sf(bkk_acc)
+
+bkk_nkde <- nkde(
+  lines = bkk_lixels,                     
+  events = bkk_acc,                    
+  w = rep(1, nrow(bkk_acc)),           
+  samples = bkk_samples,                   
+  kernel_name = "quartic",                     
+  bw = 500,                                    
+  div = "bw",                                 
+  method = "simple",                          
+  grid_shape = c(200, 200),                   
+  verbose = TRUE                               
+)
+```
+
+```{r}
+#| eval: false
+print(bkk_nkde)
+```
+
+attach the density data to samples
+```{r}
+#| eval: false
+bkk_samples$density <- bkk_nkde
+bkk_lixels$density <- bkk_nkde
+```
+
+we save the samples and lixels with bkk_nkde data to save time because it takes a a while to calculate the nkde. row names is not needed because we already have id as primary key
+```{r}
+#| eval: false
+saveRDS(bkk_samples, file = "bkk_samples_with_density.rds")
+
+saveRDS(bkk_lixels, file = "bkk_lixels_with_density.rds")
+```
+
+import them back and transform to crs3414
+```{r}
+bkk_samples_with_density <- readRDS("data/bkk_samples_with_density.rds")
+bkk_lixels_with_density <- readRDS("data/bkk_lixels_with_density.rds")
+
+#Tansform to crs3414
+bkk_samples <- st_transform(bkk_samples_with_density, 3414)
+
+bkk_lixels <- st_transform(bkk_lixels_with_density, 3414)
+
+#check crs
+st_crs(bkk_samples)
+st_crs(bkk_lixels)
+
+```
+
+
+
+Rescale density values (from events per meter to events per kilometer)
+```{r}
+bkk_samples$density <- bkk_samples$density * 10000
+bkk_lixels$density <- bkk_lixels$density * 10000
+```
+
+##3.5 Visualisation
+Set mode to view
+```{r}
+tmap_mode('view')
+```
+
+```{r}
+tm_shape(bkk_lixels) +
+  tm_lines(col = "density", palette = "YlOrRd", title.col = "Density", lwd = 2) +
+  tm_shape(bkk_acc) +
+  tm_dots(size = 0.07, col = "red", alpha = 0.5, title = "Accidents")
+```
+
+```{r}
+# Switch to 'plot' mode for static visualization
+tmap_mode('plot')
+
+# Plot with Bangkok boundary overlay
+tm_shape(bkk_boundary) + 
+  tm_borders(lwd = 1.5, col = "black") +  # Add the boundary
+  tm_shape(bkk_lixels) +
+  tm_lines(col = "density", palette = "YlOrRd", title.col = "Density", lwd = 2) +
+  tm_shape(bkk_acc) +
+  tm_dots(size = 0.07, col = "red", alpha = 0.8, title = "Accidents")
+  tm_layout(title = "Bangkok Road Density and Accidents", title.size = 1.5, title.position = c("center", "top"))
+```
+
+## **04 Spatio-temporal Point Pattern Analysis In this part we will mainly focus on Bangkok data for 2022**
+In this part we focus on temporal pattern of car accident in Bangkok province. First we will visualize the spatio-temporal dynamics of road traffic accidents in BMR using appropriate statistical graphics and geovisualization methods. After that, we will conduct detailed spatio-temporal analysis of road traffic accidents using appropriate Temporal Network Spatial Point Patterns Analysis methods.
+```{r}
+pacman::p_load(sf, raster, spatstat, sparr, tmap, tidyverse)      
+```
+
+### **4.1 Data**
+
+#### **4.1.1 Accident Read in BKK accident data and transform**
+
+```{r}
+bkk_acc <- readRDS("data/bkk_acc.rds")
+bkk_acc <- st_transform(bkk_acc, crs = 32647)
+```
+
+Because ppp object only accept numerical or character as mark. The code chunk below is used to convert data type of acq_date to numeric.
+
+```{r}
+# Check for empty rows (rows where all values are NA)
+empty_rows <- bkk_acc[apply(is.na(bkk_acc), 1, any), ]
+
+# Count the number of empty rows
+empty_row_count <- nrow(empty_rows)
+print(paste("Number of empty rows:", empty_row_count))
+
+# Drop the empty rows from the dataframe
+bkk_acc <- bkk_acc[!apply(is.na(bkk_acc), 1, any), ]
+
+# Show the cleaned dataframe
+print("DataFrame after dropping empty rows:")
+print(bkk_acc)
+
+```
+
+Create a column to indicate the year of accident
+
+```{r}
+library(lubridate)
+bkk_acc <- bkk_acc %>%
+  filter(!is.na(incident_datetime))
+bkk_acc$year <- year(ymd_hms(bkk_acc$incident_datetime))
+# 删除 year 列中有缺失值的行
+bkk_acc <- bkk_acc[!is.na(bkk_acc$year), ]
+
+head(bkk_acc)
+```
+
+Check the range of accident
+
+```{r}
+# Convert the 'incident_datetime' column to a proper date-time object if not done already
+library(lubridate)
+
+bkk_acc$incident_datetime <- ymd_hms(bkk_acc$incident_datetime)
+
+# Check the range of the incident_datetime column
+date_range <- range(bkk_acc$incident_datetime, na.rm = TRUE)
+
+# Print the range
+print(date_range)
+```
+
+```{r}
+# Check for rows with issues in the incident_datetime or report_datetime columns
+
+
+# View the cleaned data
+print(bkk_acc)
+
+```
+
+The data is full 3 year data from 2019 to 2022.
+
+Transfer the day of week to factor type to facilitate our analysis
+
+```{r}
+# Assuming your dataset is named `fire_sf` and the dayofweek column exists
+bkk_acc <- bkk_acc %>%
+  mutate(dayofweek = factor(dayofweek, 
+                            levels = c("Monday", "Tuesday", "Wednesday", 
+                                       "Thursday", "Friday", "Saturday", "Sunday"),
+                            ordered = TRUE))
+
+# Check the structure of the updated dataset
+str(bkk_acc)
+colnames(bkk_acc)
+```
+
+**4.1.2 Geospatial Data First we need to read back bkk boundary and data and unify the crs to 32647**
+
+```{r}
+bkk_boundary <- readRDS("data/bkk_boundary.rds")
+bkk_boundary2 <- readRDS("data/bkk_boundary2.rds")
+bkk_roads <- readRDS("data/bkk_roads.rds")
+
+# Transform to EPSG 32647 (WGS 84 / UTM zone 47N)
+
+bkk_boundary <- st_transform(bkk_boundary, crs = 32647)
+bkk_boundary2 <- st_transform(bkk_boundary2, crs = 32647)
+bkk_roads <- st_transform(bkk_roads, crs = 32647)
+```
+
+```{r}
+bkk_owin <- as.owin(bkk_boundary)
+bkk_owin2 <- as.owin(bkk_boundary2)
+bkk_owin
+bkk_owin2
+```
+
+```{r}
+class(bkk_owin)
+class(bkk_owin2)
+
+```
+
+##4.2 Overall Plot First we plot to have a general idea of the accident distribution
+
+```{r}
+library(tmap)
+
+# Assuming bkk_boundary is your boundary data, bkk_acc is your points data, and bkk_roads is your roads data
+tm_shape(bkk_boundary) +
+  tm_polygons() +
+tm_shape(bkk_roads) +
+  tm_lines(col = "lightyellow") +  # Overlay the roads with black lines
+tm_shape(bkk_acc) +
+  tm_dots(col = "red",size = 0.08) 
+
+
+```
+
+### 4.2 Spatial Pattern
+
+#### 4.2.1 Yearly Pattern
+
+Then we see the yearly trend of accidents in Bangkok
+
+```{r}
+tmap_mode("plot")
+
+# Then run your map code again
+tm_shape(bkk_boundary) +
+  tm_polygons() +
+tm_shape(bkk_roads) +
+  tm_lines(col = "lightyellow") +  # Overlay the roads with light yellow lines
+tm_shape(bkk_acc) +
+  tm_dots(col = "red", size = 0.08, alpha = 0.5) +
+tm_facets(by = "year", 
+          free.coords = FALSE, 
+          drop.units = TRUE)
+```
+
+The annual pattern is quite obivous that from 2019 to 2022, accident in central Bangkok seen a significant rise. It could be outcome of covid lock down. We plot a quarter trend to see if the changes match with our hypothesis
+
+```{r}
+# Season column
+bkk_acc <- bkk_acc %>%
+  mutate(Quarter = case_when(
+    Month_num %in% 1:3 ~ "Q1",
+    Month_num %in% 4:6 ~ "Q2",
+    Month_num %in% 7:9 ~ "Q3",
+    Month_num %in% 10:12 ~ "Q4"
+  ))
+
+head(bkk_acc)
+```
+
+Then plot it out
+
+```{r}
+#| eval: false
+tmap_mode("plot")
+
+tm_shape(bkk_boundary) +
+  tm_polygons() +
+tm_shape(bkk_roads) +
+  tm_lines(col = "lightyellow") +  # 道路图层
+tm_shape(bkk_acc) +
+  tm_dots(col = "red", size = 0.08, alpha = 0.5) +  # 数据点
+tm_facets(by = c("year", "Quarter"), 
+          ncol = 4,  # 每行4幅图（Q1~Q4）
+          free.coords = FALSE, 
+          drop.units = TRUE)
+
+```
+
+According to the quarter trend plotted above, we can see a rising trend of car accident in Bangkok espicially in central Bangkok since 2021. We zoom in to 2022 to study the more recent pattern in Bangkok. ###4.2.2 Seasonal Pattern
+
+```{r}
+# 使用 dplyr 创建一个新的 season 列
+library(dplyr)
+
+# 假设 bkk_acc 数据框中有一个 Month_num 列表示月份
+bkk_acc <- bkk_acc %>%
+  mutate(season = case_when(
+    Month_num %in% c(3, 4, 5,6) ~ "Hot Season",    # 热季 (3月, 4月, 5月)
+    Month_num %in% c(7, 8, 9, 10) ~ "Rainy Season",  # 雨季 (6月到10月)
+    Month_num %in% c(11, 12, 1, 2) ~ "Cool Season"    # 凉季 (11月, 12月, 1月, 2月)
+  ))
+
+# 检查新的 season 列
+print(table(bkk_acc$season))
+
+# 按照季节绘制地图
+tmap_mode("plot")
+
+tm_shape(bkk_boundary) +
+  tm_polygons() +
+tm_shape(bkk_roads) +
+  tm_lines(col = "lightyellow") +  # Overlay the roads with light yellow lines
+tm_shape(bkk_acc) +
+  tm_dots(col = "red", size = 0.15, alpha = 0.3) +
+tm_facets(by = "season", 
+          free.coords = FALSE, 
+          drop.units = TRUE)
+
+```
+
+We can observe that on rainy season, there are more accidents in central Bangkok area
+
+#### 4.2.3 Monthly Pattern of 2022
+
+Monthly trend in 2022
+
+```{r}
+library(dplyr)
+
+# Filter the data for year 2022
+bkk_acc_2022 <- bkk_acc %>% filter(year == 2022)
+
+# Plot the map for 2022 accidents only
+tmap_mode("plot")
+
+tm_shape(bkk_boundary) +
+  tm_polygons() +
+tm_shape(bkk_roads) +
+  tm_lines(col = "lightyellow") +  # Overlay the roads with light yellow lines
+tm_shape(bkk_acc_2022) +
+  tm_dots(col = "red", size = 0.2) +
+tm_facets(by = "Month_fac", 
+          free.coords = FALSE, 
+          drop.units = TRUE)
+```
+
+### 4.3 STKDE
+
+4.3.1 Monthly Pattern First we extract month from df
+
+```{r}
+bkk_acc_month <- bkk_acc %>%
+  dplyr::select(Month_num, geometry)
+
+```
+
+```{r}
+acc_month_ppp <- as.ppp(bkk_acc_month)
+acc_month_ppp
+```
+
+```{r}
+summary(acc_month_ppp)
+```
+
+```{r}
+any(duplicated(acc_month_ppp))
+```
+
+```{r}
+# 计算重复点的数量
+num_duplicates <- sum(duplicated(acc_month_ppp))
+print(paste("Number of duplicated points:", num_duplicates))
+```
+
+Including in owin data
+
+```{r}
+acc_month_owin <- acc_month_ppp[bkk_owin]
+summary(acc_month_owin)
+```
+
+```{r}
+par(mfrow=c(1,1), mar=c(0,0,1,0))
+plot(acc_month_owin, main="Plot of acc_month_owin")
+```
+
+Compute spatial temporal KDE
+
+```{r}
+st_kde <- spattemp.density(acc_month_owin)
+summary(st_kde)
+```
+
+```{r}
+# Assuming st_kde is the output of spattemp.density() and contains density images for 12 months
+tims <- 1:12  # A simple sequence from 1 to 12
+
+# Adjust the plot margins: `mar` controls the margins around each plot (bottom, left, top, right)
+par(mar = c(1, 1, 2, 1),       # Reduce margins between plots
+    oma = c(0, 0, 0, 0),       # Outer margins (around the full set of plots)
+    mgp = c(1.5, 0.5, 0))      # Move labels closer to the plot
+
+# Set up a 4x3 grid layout for 12 plots
+par(mfcol = c(3, 4))
+
+# Plot the KDE for each month (1 through 12)
+for(i in tims) { 
+  plot(st_kde$z[[i]],          # Plot the KDE for month i
+       main = paste("KDE at month", i), 
+       fix.range = TRUE)       # Ensure the color range remains consistent
+}
+
+
+```
+
+```{r}
+# month to plot
+tims <- c(1:12)
+
+# set to 2x3 and adjust the margin
+par(mfcol = c(2,3), mar = c(4, 4, 2, 1))  
+
+# plot  KDE
+for(i in tims){ 
+  plot(st_kde, i, 
+       override.par = FALSE, 
+       fix.range = TRUE, 
+       main = paste("KDE at month", i),
+       cex.main = 1.5,   # title
+       cex.axis = 1.2,   # axis
+       cex.lab = 1.3,    # label
+       lwd = 0.7)        # line width
+}
+
+```
+
+```{r}
+# Check the structure of st_kde
+str(st_kde)
+
+# Check the names or columns (if st_kde is a list of data frames or other structures)
+names(st_kde)
+
+```
+
