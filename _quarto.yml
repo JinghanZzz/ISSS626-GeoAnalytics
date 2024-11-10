@@ -54,6 +54,7 @@ website:
           - text: "Take-home Exercise 01"
             href: "Take-home_Ex/Take-Home_Ex01/Take-home_Ex01.html"
           - text: "Take-home Exercise 02"
+            href: "Take-home_Ex/Take-Home_Ex02/Take-home_Ex02.html"
           - text: "Take-home Exercise 03"
 
     right:

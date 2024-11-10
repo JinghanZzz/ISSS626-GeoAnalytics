@@ -1,0 +1,837 @@
+---
+title: "Take-Home Exercise 2 - Take-home Exercise 2: Discovering impacts of COVID-19 on Thailand tourism economy at the province level using spatial and spatio-temporal statistics" 
+
+author: "ZHANG Jinghan"
+published: "Oct 10, 2024"
+date-modified: "last-modified"
+
+execute:
+  eval: true
+  echo: true
+  message: false
+  freeze: true
+---
+
+## 01 Overview
+
+### 1.1 Setting the Scene
+
+Tourism is one of Thailand’s largest industries, accounting for some 20% of the gross domestic product (GDP). In 2019, Thailand earned 90 billion US\$ from domestic and international tourism, but the COVID-19 pandemic caused revenues to crash to 24 billion US\$ in 2020.
+
+### 1.2 Objectives
+
+The project aims to study:
+
+if the key indicators of tourism economy of Thailand are independent from space and space and time. Moran's I will be applied to determine whether tourism features in Thailand are randomly distributed or exhibit dependency on neighbours, indicating they are influenced by neighboring regions instead of being independent.
+
+If the tourism economy is indeed spatial and spatio-temporal dependent, then, local Moran's I will be applied to detect where are the clusters and outliers, and the emerging hot spot/cold spot areas.
+
+### 1.3 Study Area and Data
+
+This study will focus on Thailand and its tourism related data. 2 data set has been included.
+
+-   Thailand province boundary layer. This is a geospatial data in .shp file.
+
+-   Aspatial data about monthly provincial data on tourist number, occupancy and revenue in Thailand during 2019 to 2023 downloaded from Kaggle \[thailand_domestic_tourism_2019_2023_ver2.csv\]
+
+In our study, we take \[per_capita_spend\] as key indicator for thai tourism data.
+
+## 02 Getting Started
+
+The following packages will be used in this study:
+
+-   **sf** dealing with spatial features
+
+-   **readr** to read in csv file
+
+-   **dplyr** for relational join
+
+-   **spdep** for calculatingspatial weights and spatially lagged variables
+
+-   **tidyverse** for wrangling attribute data in R
+
+-   **tmap** for preparing cartographic quality chropleth map
+
+Import the packages
+
+```{r}
+pacman::p_load(sf, spdep, tmap, tidyverse, knitr, dplyr, tidyr)
+```
+
+## 03 Data Preparation
+
+### 3.1 Import Data
+
+Import Aspatial Data
+
+***read_csv()*** of **readr** package to import tourism data and get a df dataframe
+
+```{r}
+#| eval: false
+tourism <- read_csv("data/rawdata/thailand_domestic_tourism_2019_2023_ver2.csv")
+```
+
+Import Geospatial Data
+
+```{r}
+#| eval: false
+prov <- st_read(dsn = "data/rawdata/tha_adm_rtsd_itos_20210121_shp", 
+                 layer = "tha_admbnda_adm1_rtsd_20220121") %>%
+  st_transform(crs=32648)
+```
+
+```{r}
+#| eval: false
+tm_shape(prov)+
+  tm_polygons()
+```
+
+### 3.3 Aspatial Data Wrangling
+
+First we open the environment to observe the dataset.
+
+```{r}
+#| eval: false
+head(tourism,10)
+```
+
+I dropped the following columns:
+
+\[province_thai\] and \[region_thai\] : I cannot make use of this Thai columns so I drop them.
+
+Then check the unique value in the \[**variable**\] column
+
+```{r}
+#| eval: false
+unique(tourism$variable)
+```
+
+These variables should be transposed to be a new column
+
+```{r}
+#| eval: false
+tourism <- tourism %>%
+  select(date, province_eng, variable, value) %>%
+  pivot_wider(names_from = variable, values_from = value, values_fn = sum)
+```
+
+Create year, quarter and month columns for further analysis
+
+```{r}
+#| eval: false
+tourism <- tourism %>%
+  mutate(
+    year = as.numeric(format(date, "%Y")),       
+    month = as.numeric(format(date, "%m")),      
+    quarter = ceiling(as.numeric(format(date, "%m")) / 3)  
+  )
+head(tourism, 10)
+```
+
+Check duplicates and missing values
+
+```{r}
+#| eval: false
+duplicates <- anyDuplicated(tourism)
+missing <- colSums(is.na(tourism))
+
+print(paste("duplicates：", duplicates))
+print(missing)
+```
+
+### 3.4 Geospatial Data Wrangling
+
+Convert multipolygon to individual polygons
+
+```{r}
+#| eval: false
+sf_polygon <- prov %>%
+  st_cast("POLYGON") %>%
+  mutate(area = st_area(.))
+```
+
+Group by the unique name and select the largest polygon by area
+
+```{r}
+#| eval: false
+prov <- sf_polygon %>%
+  group_by(ADM1_EN) %>%
+  filter(area==max(area))%>%
+  ungroup()%>%
+  select(-area)%>%
+  select(ADM1_EN)
+```
+
+Check duplicate and missing value
+
+```{r}
+#| eval: false
+# Check for duplicate rows
+duplicate_rows <- prov[duplicated(prov), ]
+print(duplicate_rows)
+
+#Check missing values
+rows_with_missing <- prov[!complete.cases(st_drop_geometry(prov)), ]
+print(rows_with_missing)
+```
+
+### 3.5 Join Aspatial and Geospatial Data
+
+We use province name as primary key to join the data, so we check these columns first.
+
+They are not uniformed so we align them
+
+```{r}
+#| eval: false
+prov$province <- prov$ADM1_EN
+
+# replace the province name
+prov$province[prov$province == "Lop Buri"] <- "Lopburi"
+prov$province[prov$province == "Chon Buri"] <- "Chonburi"
+prov$province[prov$province == "Phangnga"] <- "Phang Nga"
+prov$province[prov$province == "Si Sa Ket"] <- "Sisaket"
+prov$province[prov$province == "Buri Ram"] <- "Buriram"
+prov$province[prov$province == "Prachin Buri"] <- "Prachinburi"
+
+prov <- prov[, !(names(prov) %in% "ADM1_EN")]
+```
+
+```{r}
+#| eval: false
+joined_data <- prov %>%
+  left_join(tourism, by = c("province" = "province_eng"))
+
+joined_data <- joined_data %>%
+  drop_na()
+
+head(joined_data,5)
+```
+
+Save the joined and cleaned data to rds and import again
+
+```{r}
+#| eval: false
+saveRDS(joined_data, file = "data/joined_data.rds")
+```
+
+Import it back and transform the crs
+
+```{r}
+thai <- readRDS("data/joined_data.rds")
+```
+
+```{r}
+thai <- st_transform(thai, crs = 32648)
+```
+
+Simplify the geometry (to reduce computational load)
+
+```{r}
+#  Simplify the geometry (to reduce computational load)
+thai <- st_simplify(thai, dTolerance = 10)
+```
+
+## 04 Spatial Autocorrelation
+
+### -- are tourism economy indicators dependent from space?
+
+In this part we will use Moran's I to determine whether the distribution of tourism economy indicators are random or clustered.
+
+**The Null Hypothesis:**
+
+-   Observed spatial pattern of values is equally likely as any other spatial pattern.
+
+-   Values at one location do not depend on values at other (neighbouring) locations.
+
+-   Under spatial randomness, the location of values may be altered without aff ecting the information content of the data.
+
+### 4.1 Import Data Aggregating the Data by Year and Quarter
+
+To speed our analysis and to observe the yearly trend of thai tourism economic indicator, we slice the data by year and pick \[revenue_all\] as our key indicator.
+
+```{r}
+#| eval: false
+# Drop specified columns from the 'thai' data frame
+thai <- subset(thai, select = -c(ratio_tourist_stay, no_tourist_stay, no_tourist_thai, no_tourist_foreign, revenue_thai, revenue_foreign))
+```
+
+```{r}
+# rename revenue_all_sum to revenue
+names(thai)[names(thai) == "revenue_all"] <- "revenue"
+```
+
+Aggregate revenue_all by year for each province and change the unit of revenue to thousand THB
+
+```{r}
+# Aggregate revenue and number of tourists by year and province
+annual_data <- thai %>%
+  group_by(year, province) %>%
+  summarise(
+    total_revenue = sum(revenue, na.rm = TRUE),
+    total_tourists = sum(no_tourist_all, na.rm = TRUE)
+  ) %>%
+  mutate(per_capita_spend = total_revenue / total_tourists)
+```
+
+```{r}
+#| eval: false
+saveRDS(annual_data, "data/annual_data.rds")
+```
+
+### 4.2 **Computing Contiguity Spatial Weights** and Row Standardised Weight Matrix
+
+Before we can compute the global spatial autocorrelation statistics, we need to construct a spatial weights of the study area. The spatial weights is used to define the neighbourhood relationships between the geographical units (i.e. county) in the study area. Here we will use a queen method which takes neighbour with shared edges as neighbour.
+
+```{r}
+annual_data <- readRDS("data/annual_data.rds")
+annual_data <- st_transform(annual_data, crs = 32648)
+```
+
+```{r}
+#data_2019 <- annual_data %>% 
+#  filter(year == 2019)
+```
+
+```{r}
+spending_all <- annual_data %>%
+  group_by(province) %>%
+  summarise(
+    total_revenue = sum(total_revenue, na.rm = TRUE),
+    total_tourists = sum(total_tourists, na.rm = TRUE)
+  ) %>%
+  mutate(per_capita_spend = total_revenue / total_tourists)
+```
+
+```{r}
+wm_q <- poly2nb(spending_all, 
+                queen=TRUE)
+summary(wm_q)
+```
+
+Here we use row standardise to assign the weight equally to each neighbour of the province, which is fractional to the number neighbour the province have.
+
+```{r}
+rswm_q <- nb2listw(wm_q, 
+                   style="W", 
+                   zero.policy = TRUE)
+rswm_q
+```
+
+### 4.3 Computing Distance Based Neighbour Matrix and Row Standardised Weight Matrix
+
+Calculate the centroid for each province and check if they are really inside the boundary of the province
+
+```{r}
+centroids <- annual_data %>%
+  group_by(province) %>%               
+  summarize(geometry = st_union(geometry)) %>% 
+  st_centroid() %>%                    
+  select(province, geometry)           
+
+```
+
+plot the map to check
+
+```{r}
+tmap_mode("view")
+tm_shape(annual_data) +
+  tm_polygons(col = "lightblue", border.col = "black") +
+  tm_shape(centroids) +   tm_symbols(col = "red", size = 0.1) +
+  tm_layout(title = "Map of Annual Data with Centroids")
+```
+
+```{r}
+tmap_mode("plot")
+```
+
+We plot the centroid over the province boundary and zoom in to see if centroids are really in each province.
+
+Then we need to define a upper limit for distance band.
+
+```{r}
+#coords <- coordinates(centroids)
+k1 <- knn2nb(knearneigh(centroids))
+k1dists <- unlist(nbdists(k1, centroids))
+summary(k1dists)
+```
+
+The summary report shows that the largest first nearest neighbour distance is 12.5 km, so using this as the upper threshold gives certainty that all units will have at least one neighbour.
+
+Then we use adaptive distance weight matrix. This method ensures that each province in Thailand has the same number of neighbors, as the number of neighboring provinces varies across the country. This approach helps to make the analysis outcomes more balanced.
+
+```{r}
+knn6 <- knn2nb(knearneigh(centroids, k=6))
+knn6
+```
+
+```{r}
+str(knn6)
+```
+
+Then we derive a **inverse distance spatial weight matrix**
+
+```{r}
+dist <- nbdists(knn6, centroids)
+ids <- lapply(dist, function(x) 1/(x))
+ids
+```
+
+Now each of the 6 neighbours of the provinces has a spatial weight based on the 1/distance, which indicates closer the distance is, higher the influence it brings
+
+Then we row standardise the weight so all the neighbours of one province shares one. It's easier to understand the outcome
+
+```{r}
+rswm_knn6 <- nb2listw(knn6, style="W", zero.policy = TRUE)
+rswm_knn6
+```
+
+::: callout-note
+n=75 using knn method whereas n = 75 in contingency matrix because Phuket the island is close to Phang Nga but not connected to it, so it has no neighbour in contingency matrix.
+:::
+
+### 4.4 **Global Measures of Spatial Autocorrelation: Moran’s I**
+
+Then we do Moran's I test to decide if we reject null hypothesis and accept that economic indicator of Thailand is not randomly distributed but dependent on the situation of its neighbours.
+
+#### **4.4.1 Moran's I with Monte Carlo Simulation Using Contingency Based Weight Matrix**
+
+**Moran's I test** of per_capita_spend in 2019
+
+```{r}
+moran.test(spending_all$per_capita_spend, 
+           listw=rswm_q, 
+           zero.policy = TRUE, 
+           na.action=na.omit)
+```
+
+::: callout-note
+1.  **p-value = 0.0036\<0.05** This allows us to reject the null hypothesis of spatial randomness with 95% confidence level. Therefore, there is significant positive spatial autocorrelation in per capita spending across provinces.
+
+2.  **Moran’s I Statistic**: The observed Moran’s I statistic is **0.1485**, which is a positive value, indicating a mild positive spatial autocorrelation. This suggests that provinces with similar levels of per capita spending tend to be located near each other, implying some spatial clustering effect.
+
+3.  **Expectation**: Under the assumption of complete spatial randomness, the expected value of Moran's I is **-0.00637**. The observed Moran’s I is significantly higher than the expectation, indicating that the spatial pattern deviates from randomness.
+
+4.  **Standard Deviate of Moran’s I**: The standard deviate of Moran’s I is **2.4905**, showing that the observed value deviates significantly from the expected value under randomization.
+
+Summary
+
+These results indicate significant positive spatial autocorrelation in the per capita spending of tourists across Thai provinces. This clustering effect suggests that neighboring provinces tend to influence each other in terms of tourism spending, possibly due to regional economic factors or geographic proximity.
+:::
+
+**Monte Carlo Simulation**
+
+Since we cannot assure perfect nomality and randomness of our dataset, so we do monte carlo simulation to imporve the accuracy of our statistic test.
+
+set the seed to make the result repeatable
+
+```{r}
+set.seed(1234)
+bperm= moran.mc(spending_all$per_capita_spend, 
+                listw=rswm_q, 
+                nsim=999, 
+                zero.policy = TRUE, 
+                na.action=na.omit)
+bperm
+```
+
+We plot a histogram of the monte carlo Moran'I test
+
+```{r}
+mean(bperm$res[1:999])
+```
+
+```{r}
+var(bperm$res[1:999])
+```
+
+```{r}
+summary(bperm$res[1:999])
+```
+
+```{r}
+hist(bperm$res, 
+     freq=TRUE, 
+     breaks=20, 
+     xlab="Simulated Moran's I")
+abline(v=0, 
+       col="red") 
+```
+
+::: callout-note
+The histogram shows that the observed Moran's I (red line) is much higher than values expected under spatial randomness. This significant positive spatial autocorrelation (p = 0.017) suggests clustering in tourism revenue among neighboring provinces, likely due to regional economic or geographic factors.
+
+The Monte Carlo simulation further confirms this, supplementing assumptions of normality and randomness, and providing strong evidence of non-random spatial clustering. This implies that neighboring provinces influence each other in terms of tourism revenue, possibly due to regional economic factors, shared resources, or geographical proximity effects.
+:::
+
+#### 4.4.2 **Moran's I with Monte Carlo Simulation Using Distance Based Weight Matrix**
+
+**Moran's I test** of per_capita_spend
+
+```{r}
+moran.test(spending_all$per_capita_spend, 
+           listw=rswm_knn6, 
+           zero.policy = TRUE, 
+           na.action=na.omit)
+```
+
+**Monte Carlo Simulation**
+
+```{r}
+set.seed(1234)
+bperm_knn6= moran.mc(spending_all$per_capita_spend, 
+                listw=rswm_knn6, 
+                nsim=999, 
+                zero.policy = TRUE, 
+                na.action=na.omit)
+bperm_knn6
+```
+
+```{r}
+hist(bperm_knn6$res, 
+     freq=TRUE, 
+     breaks=20, 
+     xlab="Simulated Moran's I for Distance Based Weight Matrix")
+abline(v=0, 
+       col="red") 
+```
+
+#### 4.4.3 Summary
+
+By comparing the Moran's I result, we find the distance based method performs better and show a more significant cluster tendency.
+
+::: callout-note
+**4.4.1 Neighbor-Based Moran's I**
+
+-   **Method**: This approach uses a neighbor-based weight matrix (such as Queen or Rook contiguity), where each province is only adjacent to directly neighboring provinces.
+
+-   **Statistic**: The observed Moran's I statistic is **0.1761**, indicating mild positive spatial autocorrelation.
+
+-   **p-value**: The p-value is **0.0036**, below the significance level (e.g., 0.05), suggesting that we can reject the null hypothesis of spatial randomness and that significant spatial autocorrelation exists.
+
+-   **Interpretation**: The mild spatial autocorrelation may be due to the limited direct neighbors for some provinces, leading to a weaker clustering effect.
+
+    **4.4.2 Distance-Based Moran's I (Using k-Nearest Neighbors)**
+
+-   **Method**: This approach uses a k-nearest neighbors distance weight matrix (`rswm_knn6`), ensuring each province has the same number of neighbors (e.g., 6 neighbors). This is especially useful in areas with a mix of urban and rural regions, as it minimizes the impact of uneven neighbor counts across provinces.
+
+-   **Statistic**: The observed Moran's I statistic is **0.2996**, higher than the neighbor-based method, indicating stronger positive spatial autocorrelation.
+
+-   **p-value**: The p-value is **0.001**, significantly below 0.05, further confirming the strong spatial autocorrelation.
+
+-   **Interpretation**: The higher Moran's I value and lower p-value suggest that the distance-based Moran's I approach captures a more pronounced spatial clustering effect. This may be because the distance-based weight matrix allows for a more balanced spatial influence between provinces, especially in densely populated areas, where clustering effects are more pronounced.
+
+**Summary**
+
+Compared to the neighbor-based Moran's I, the distance-based k-nearest neighbors approach shows a higher level of spatial autocorrelation. This indicates that tourist per capita spending across provinces in Thailand exhibits a significant spatial clustering effect, which is likely influenced by geographic proximity, regional economic factors, or shared resources. The distance-based approach better reflects inter-provincial connections, particularly in areas with uneven neighbor counts (such as mixed urban and rural regions).
+:::
+
+## 05 Local Spatial Temporal Autocorrelation
+
+### -– detecting clusters and outliers
+
+Since the Moran' I has prove that the economic indicator of Thai tourism industry in not randomly distributed in space, we want we know how the pattern be like, where are the clusters and outliers.
+
+LISA will be applied here, which calculates spatial temporal autocorrelation at local level, focusing on each individual spatial unit and its relation with its neighbours. It captures clusters (high-high or low-low) and outliers (high-low or low-high).
+
+First, we need a null hypothesis for lisa【记得回来写！！】
+
+### 5.1 Computing Local Moran's I
+
+The contiguity matrix has already been calculated during the global Moran's I analysis. Since the spatial structure of the data has not changed, we can reuse these matrices for the LISA (Local Moran’s I) analysis without recalculating them. This allows for consistency in evaluating spatial relationships across both global and local measures.
+
+To compute local Moran’s I, the [*localmoran()*](https://r-spatial.github.io/spdep/reference/localmoran.html) function of **spdep** will be used. It computes *Ii* values, given a set of *zi* values and a listw object providing neighbour weighting information for the polygon associated with the zi values
+
+```{r}
+fips <- order(spending_all$province)
+```
+
+```{r}
+localMI <- localmoran(spending_all$per_capita_spend, rswm_knn6)
+head(localMI)
+```
+
+```{r}
+printCoefmat(data.frame(
+  localMI[fips,], 
+  row.names=spending_all$province[fips]),
+  check.names=FALSE)
+```
+
+Then we map the localMI to annual_data
+
+```{r}
+spending_all.localMI <- cbind(spending_all,localMI) %>%
+  rename(Pr.Ii = Pr.z....E.Ii..)
+```
+
+plot out the local moran's I together with it's p-value
+
+```{r}
+# Local Moran's I map
+localMI.map <- tm_shape(spending_all.localMI) +
+  tm_fill(col = "Ii", 
+          style = "pretty", 
+          title = "2019 Local Moran Statistics") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(title.fontface = "bold")  # 加粗标题
+
+# P-value map
+pvalue.map <- tm_shape(spending_all.localMI) +
+  tm_fill(col = "Pr.Ii", 
+          breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf),
+          palette = "-Blues", 
+          title = "2019 Local Moran's I p-values") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(title.fontface = "bold")  # 加粗标题
+
+# Arrange maps side by side
+tmap_arrange(localMI.map, pvalue.map, asp = 1, ncol = 2)
+
+```
+
+We plot another map using p-value as filter. The dim area are placed where Moran's I is not significant(p\>0.05)
+
+```{r}
+# Modify data to set Ii values to NA where Pr.Ii > 0.05
+spending_all.localMI <- spending_all.localMI %>%
+  mutate(not_significant = ifelse(Pr.Ii > 0.05, NA, Ii))
+
+# Create the map with a single legend
+combined_map <- tm_shape(spending_all.localMI) +
+  tm_fill(col = "not_significant", 
+          style = "pretty", 
+          palette = "Reds",
+          colorNA = "gray",                   # Gray out areas where p > 0.05
+          textNA = "Not Significant",         # Label NA as "Not Significant"
+          title = "2019 Local Moran's I (Filtered by p-value)") +
+  tm_borders(alpha = 0.5) +
+  tm_layout(title.fontface = "bold")         # Make the title bold
+
+# Display the map
+combined_map
+
+```
+
+::: callout-note
+The map is displaying the Moran's I values for the per capita tourism spending across Thailand's provinces:
+
+-   The Moran's I statistic is being used to measure the spatial autocorrelation or clustering pattern of the per capita tourism spending data.
+
+The southern provinces, shown in the orange-red shades, have higher Moran's I values ranging from 4-7. This indicates strong positive spatial autocorrelation - the southern regions with high tourism spending are clustered together, forming distinct tourism hubs.
+
+We zoom in to discover that the cluster is extremely strong in Phuket, a hot tourist destination in Thailand.
+
+In contrast, the central and northeastern provinces have lower Moran's I values, generally 0-3.
+
+-   This suggests more random, dispersed patterns of per capita tourism spending in those inland areas, without the same degree of spatial clustering.
+
+The "Not Significant" regions likely have Moran's I values close to 0, meaning no statistically significant spatial autocorrelation was detected for those provinces.
+
+So in summary, this map is visualizing the geographic variations in the spatial clustering of per capita tourism spending data across Thailand, as measured by the Moran's I statistic. The southern provinces exhibit the strongest spatial clustering of high tourism spending, while the interior regions show more dispersed patterns.
+:::
+
+### 5.2 LISA Cluster Map
+
+#### **5.2.1 Plotting Moran Scatter Plot with Standardised Variable**
+
+The Moran scatterplot is an illustration of the relationship between the values of the chosen attribute at each location and the average value of the same attribute at neighboring locations.
+
+This is the original one
+
+```{r}
+nci <- moran.plot(spending_all$per_capita_spend, rswm_knn6,
+                  labels=as.character(spending_all$province), 
+                  xlab="per capita spend", 
+                  ylab="Spatially Lag per capita spend 2019")
+```
+
+we plot a scatter plot using standardised variable with mean of 0, SD of 1 to eliminate difference in data range that leads to schkewed result and also make the visulisation easier to understand
+
+```{r}
+spending_all$Z.per_capita_spend <- scale(spending_all$per_capita_spend) %>% 
+  as.vector 
+```
+
+```{r}
+nci2 <- moran.plot(spending_all$Z.per_capita_spend, rswm_knn6,
+                   labels=as.character(spending_all$province),
+                   xlab="Standardised Per Capita Tourism Spend in Thailand", 
+                   ylab="Spatially Lag z-per capita spend")
+```
+
+::: callout-note
+This plot is a **Moran scatterplot** of per capita tourism spending across regions in Thailand, illustrating the spatial autocorrelation of this variable. The x-axis represents the standardized per capita tourism spending in each region, while the y-axis shows the spatially lagged standardized per capita spending (i.e., the average standardized spending in neighboring regions). The interpretation of the quadrants is as follows:
+
+1.  **Quadrant I (High-High)**: Regions such as Phuket have higher-than-average tourism spending, with neighboring regions also exhibiting high spending. This indicates positive spatial autocorrelation, where high-spending areas cluster together.
+
+2.  **Quadrant II (Low-High)**: Regions like Ranong and Phang Nga have lower-than-average spending, while their neighboring regions show higher spending. This reflects negative spatial autocorrelation, where lower-spending areas are near higher-spending ones.
+
+3.  **Quadrant III (Low-Low)**: Many regions fall into this quadrant, where both the region and its neighbors have lower-than-average spending. This indicates positive spatial autocorrelation, with low-spending areas clustering together.
+
+4.  **Quadrant IV (High-Low)**: Bangkok falls in this quadrant, with high tourism spending, while neighboring regions have lower spending, indicating negative spatial autocorrelation.
+
+Overall, the positive slope of the line represents a general trend of spatial autocorrelation, where high-spending regions tend to be near other high-spending regions, and low-spending regions cluster together. Areas like Phuket and Bangkok show distinct spatial patterns, suggesting potential concentration and heterogeneity in tourism spending.
+:::
+
+#### 5.2.2 **Preparing LISA map classes**
+
+```{r}
+quadrant <- vector(mode="numeric",length=nrow(localMI))
+```
+
+Next, derives the spatially lagged variable of interest (i.e. GDPPC) and centers the spatially lagged variable around its mean.
+
+```{r}
+spending_all$lag_spend <- lag.listw(rswm_knn6, spending_all$per_capita_spend)
+DV <- spending_all$lag_spend - mean(spending_all$lag_spend)     
+```
+
+Then center the locoal Moran's I around the mean
+
+```{r}
+LM_I <- localMI[,1] - mean(localMI[,1])    
+```
+
+set significnat level to 0.05
+
+```{r}
+signif <- 0.05       
+```
+
+These four command lines define the low-low (1), low-high (2), high-low (3) and high-high (4) categories and non-significant Moran in the category (0)
+
+```{r}
+quadrant[DV <0 & LM_I>0] <- 1
+quadrant[DV >0 & LM_I<0] <- 2
+quadrant[DV <0 & LM_I<0] <- 3  
+quadrant[DV >0 & LM_I>0] <- 4    
+quadrant[localMI[,5]>signif] <- 0
+```
+
+Plot the LISA map with a filter of p value \< 0.05 so it's easier to observe the pattern
+
+```{r}
+tmap_mode("plot")
+```
+
+```{r}
+# 定义 quadrant 和其他参数
+spending_all.localMI$quadrant <- quadrant
+colors <- c("#ffffff", "#2c7bb6", "#abd9e9", "#fdae61", "#d7191c")
+clusters <- c("insignificant", "low-low", "low-high", "high-low", "high-high")
+
+# 绘制地图，并在每个省上叠加省名
+tm_shape(spending_all.localMI) +
+  tm_fill(col = "quadrant", 
+          style = "cat", 
+          palette = colors[c(sort(unique(quadrant)))+1], 
+          labels = clusters[c(sort(unique(quadrant)))+1],
+          popup.vars = c("")) +
+  tm_borders(alpha = 0.5) +
+  tm_layout(title = "Spatial Autocorrelation of Per Capita Spending in Thailand", 
+            title.position = c("center", "top"))
+
+```
+
+06 **Hot Spot and Cold Spot Area Analysis**
+
+::: callout-note
+The colors represent clusters of regions with similar per capita spending levels, helping to reveal spatial patterns in Thailand's tourism economy. Here’s a detailed description:
+
+-   **White (insignificant)**: This indicates regions where per capita spending does not show significant spatial autocorrelation. These areas have no clear pattern of high or low tourism spending.
+
+-   **High-High Clusters (red)**: This indicates high per capita spending areas that are also adjacent to other high-spending areas, forming clusters of high expenditure. The red regions are Phuket, Phang Nga, Krabi, and Surat Thani. They are popular tourist destinations along the coast, contributing significantly to Thailand's tourism economy.
+
+-   **Low-High Clusters (blue)**: These regions have lower per capita spending but are adjacent to popular tourism destinations mentioned above. These are regions with untapped tourism potential like Nakhon Si Thammarat, Chum-phon and Ranong, which could benefit from proximity to high-expenditure areas, suggesting potential for future tourism growth.
+:::
+
+## 06 Hot Spot and Cold Spot Area Analysis
+
+### -- who are the outliers and how Covid-19 affects tourism economy in Thailand.
+
+We want to see how the hot and cold spot area in Thailand changes before and after covid 19, so we slice 2019 Q1 as before, 2021 Q1 as Covid and 2023 as after. I take Q1 is because both pre Covid, Covid and post Coivd time period has Q1 with relatively larger sample to do the analysis.
+
+### 6.1 Extract Economic Indicator Before, During and After Coivd
+
+```{r}
+# Aggregate revenue and number of tourists by year and province
+seasonal_data <- thai %>%
+  group_by(quarter, year, province) %>%
+  summarise(
+    total_revenue = sum(revenue, na.rm = TRUE),
+    total_tourists = sum(no_tourist_all, na.rm = TRUE)
+  ) %>%
+  mutate(per_capita_spend = total_revenue / total_tourists)
+```
+
+```{r}
+pre <- seasonal_data %>% 
+  filter(year == 2019, quarter==1)
+
+cov <- seasonal_data %>% 
+  filter(year == 2019, quarter==1)
+
+post <- seasonal_data %>% 
+  filter(year == 2019, quarter==1)
+```
+
+### 6.2 Deriving Distance Based Weight Matrix
+
+```{r}
+longitude <- map_dbl(post$geometry, ~st_centroid(.x)[[1]])
+
+latitude <- map_dbl(post$geometry, ~st_centroid(.x)[[2]])
+
+coords <- cbind(longitude, latitude)
+```
+
+```{r}
+k1 <- knn2nb(knearneigh(coords))
+k1dists <- unlist(nbdists(k1, coords))
+```
+
+```{r}
+summary(k1dists) 
+```
+
+Min. 1st Qu. Median Mean 3rd Qu. Max.
+
+21597 51931 65129 64275 77768 125011
+
+The summary report shows that the largest first nearest neighbour distance is 12.5km, so using this as the upper threshold gives certainty that all units will have at least one neighbour.
+
+**Compute Adaptive Distance Weight Matrix**
+
+```{r}
+knn <- knn2nb(knearneigh(coords, k=8))
+```
+
+```{r}
+knn_lw <- nb2listw(knn, style = 'B')
+summary(knn_lw)
+```
+
+### Computing Gi Statistics Using Adaptive Distance Weights
+
+Since the province in Thailand does not change, we keep the distanced based spatial weight matrix and reverse distance.
+
+```{r}
+#| eval: false
+fips <- order(post$province)
+gi.adaptive <- localG(post$per_capita_spend, knn_lw)
+post.gi <- cbind(post, as.matrix(gi.adaptive)) %>%
+  rename(gstat_adaptive = as.matrix.gi.adaptive.)
+```
+
+```{r}
+#| eval: false
+#post<- qtm(post, "pre-covid per capita spend")
+
+Gimap <- tm_shape(post.gi) + 
+  tm_fill(col = "gstat_adaptive", 
+          style = "pretty", 
+          palette="-RdBu", 
+          title = "local Gi") + 
+  tm_borders(alpha = 0.5)
+
+```
