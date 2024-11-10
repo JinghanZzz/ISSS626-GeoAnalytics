@@ -1,0 +1,170 @@
+---
+title: "In-class_Ex09"
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+import packages
+
+```{r}
+pacman::p_load(tmap, SpatialAcc, sf, 
+               ggstatsplot, reshape2,
+               tidyverse)
+```
+
+import data
+
+```{r}
+# 导入地理空间数据并转换为 CRS 3414
+
+mpsz <- st_read(dsn = "data/geospatial", 
+                layer = "MP14_SUBZONE_NO_SEA_PL") %>% 
+  st_transform(crs = 3414)
+
+hexagons <- st_read(dsn = "data/geospatial", 
+                    layer = "hexagons") %>% 
+  st_transform(crs = 3414)
+
+eldercare <- st_read(dsn = "data/geospatial", 
+                     layer = "ELDERCARE") %>% 
+  st_transform(crs = 3414)
+
+```
+
+```{r}
+# 导入 OD 矩阵数据
+ODMatrix <- read_csv("data/aspatial/OD_Matrix.csv", 
+                     skip = 0)
+
+```
+
+assume to everyone has the capacity of 100 will be much easier
+
+```{r}
+eldercare <- eldercare %>%
+  select(fid, ADDRESSPOS) %>%
+  mutate(capacity = 100)
+
+```
+
+```{r}
+CHAS <- st_read("data/rawdata/CHASClinics.kml") %>%
+  st_transform(crs = 3414)
+```
+
+```{r}
+buffer_1km <- st_buffer(eldercare, 
+                        dist = 1000)
+```
+
+```{r}
+tmap_mode("view")
+tm_shape(buffer_1km) +
+  tm_polygons() +
+tm_shape(CHAS) +
+  tm_dots()
+```
+
+```{r}
+buffer_1km$pts_count <- lengths(
+  st_intersects(buffer_1km, CHAS))
+```
+
+**Data cleaning and Updating Attributes**
+
+supply
+
+```{r}
+eldercare <- eldercare %>%
+  select(fid, ADDRESSPOS) %>%
+  mutate(capacity = 100)
+```
+
+Demand
+
+```{r}
+hexagons <- hexagons %>%
+  select(fid) %>%
+  mutate(demand = 100)
+```
+
+OD Matrix
+
+```{r}
+distmat <- ODMatrix %>%
+  select(origin_id, destination_id, total_cost) %>%
+  spread(destination_id, total_cost)%>%
+  select(c(-c('origin_id')))
+```
+
+```{r}
+distmat_km <- as.matrix(distmat/1000)
+```
+
+## Computing Handsen’s Accessibility
+
+base
+
+```{r}
+acc_Hansen <- data.frame(ac(hexagons$demand,
+                            eldercare$capacity,
+                            distmat_km, 
+                            #d0 = 50,
+                            power = 2, 
+                            family = "Hansen"))
+```
+
+Tidy the output
+
+```{r}
+colnames(acc_Hansen) <- "accHansen"
+
+acc_Hansen <- as_tibble(acc_Hansen)
+
+hexagon_Hansen <- bind_cols(hexagons, acc_Hansen)
+```
+
+Combine
+
+```{r}
+acc_Hansen <- data.frame(ac(hexagons$demand,
+                            eldercare$capacity,
+                            distmat_km, 
+                            #d0 = 50,
+                            power = 0.5, 
+                            family = "Hansen"))
+
+colnames(acc_Hansen) <- "accHansen"
+acc_Hansen <- as_tibble(acc_Hansen)
+hexagon_Hansen <- bind_cols(hexagons, acc_Hansen)
+```
+
+### Visualising Accessibility
+
+```{r}
+mapex <- st_bbox(hexagons)
+
+tmap_mode("plot")
+tm_shape(hexagon_Hansen,
+         bbox = mapex) + 
+  tm_fill(col = "accHansen",
+          n = 10,
+          style = "quantile",
+          border.col = "black",
+          border.lwd = 1) +
+tm_shape(eldercare) +
+  tm_symbols(size = 0.1) +
+  tm_layout(main.title = "Accessibility to eldercare: Hansen method",
+            main.title.position = "center",
+            main.title.size = 2,
+            legend.outside = FALSE,
+            legend.height = 0.45, 
+            legend.width = 3.0,
+            legend.format = list(digits = 6),
+            legend.position = c("right", "top"),
+            frame = TRUE) +
+  tm_compass(type="8star", size = 2) +
+  tm_scale_bar(width = 0.15) +
+  tm_grid(lwd = 0.1, alpha = 0.5)
+```

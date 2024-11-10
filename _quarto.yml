@@ -40,6 +40,7 @@ website:
           - text: "In-class Exercise 02"
             href: "In-class_Ex/In-class_Ex02/In-class_Ex02.qmd"
           - text: "In-class Exercise 03"
+            href: "In-class_Ex/In-class_Ex03/In-class_Ex03.qmd"
           - text: "In-class Exercise 04"
             href: "In-class_Ex/In-class_Ex04/In-class_Ex04.qmd"
           - text: "In-class Exercise 05"
@@ -49,8 +50,10 @@ website:
           - text: "In-class Exercise 07"
             href: "In-class_Ex/In-class_Ex07/In-class_Ex07.qmd"
           - text: "In-class Exercise 08"
+            href: "In-class_Ex/In-class_Ex8/In-class_Ex08.qmd"
           - text: "In-class Exercise 09"
-          - text: "In-class Exercise 10"
+            href: "In-class_Ex/In-class_Ex09/In-class_Ex09.qmd"
+
   
       - text: "Take-home Exercise"
         menu:

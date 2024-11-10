@@ -1,0 +1,123 @@
+---
+title: "In-class-Exercise 03"
+author: "ZHANG Jinghan"
+date: "Sep 9 2024"
+execute:
+  eval: false
+  echo: true
+  message: false
+  freeze: true
+---
+
+```{r}
+pacman::p_load(sf, spNetwork, tmap, tidyverse)
+```
+
+**Import Data**
+
+```{r}
+network <- st_read(dsn="data/geospatial", 
+                   layer="Punggol_St")
+```
+
+```{r}
+childcare <- st_read(dsn="data/geospatial",
+                     layer="Punggol_CC")
+```
+
+**Visualise**
+
+```{r}
+plot(st_geometry(network))
+plot(childcare,add=T,col='red',pch = 19)
+```
+
+```{r}
+tmap_mode('view')
+tm_shape(childcare) + 
+  tm_dots() + 
+  tm_shape(network) +
+  tm_lines()
+```
+
+```{r}
+tmap_mode('plot')
+```
+
+**NKDE**
+
+Lixel
+
+```{r}
+library(stplanr)
+lixels <- lixelize_lines(network, 
+                         700, 
+                         mindist = 375)
+```
+
+Line center point
+
+```{r}
+samples <- lines_center(lixels) 
+```
+
+calculate nkde
+
+```{r}
+densities <- nkde(network, 
+                  events = childcare,
+                  w = rep(1, nrow(childcare)),
+                  samples = samples,
+                  kernel_name = "quartic",
+                  bw = 300, 
+                  div= "bw", 
+                  method = "simple", 
+                  digits = 1, 
+                  tol = 1,
+                  grid_shape = c(1,1), 
+                  max_depth = 8,
+                  agg = 5, 
+                  sparse = TRUE,
+                  verbose = FALSE)
+```
+
+#### **Visualising NKDE**
+
+```{r}
+samples$density <- densities
+lixels$density <- densities
+```
+
+```{r}
+# rescaling to help the mapping
+samples$density <- samples$density*1000
+lixels$density <- lixels$density*1000
+```
+
+```{r}
+tmap_mode('view')
+tm_shape(lixels)+
+  tm_lines(col="density")+
+tm_shape(childcare)+
+  tm_dots()
+tmap_mode('plot')
+```
+
+## **Network Constrained G- and K-Function Analysis**
+
+```{r}
+kfun_childcare <- kfunctions(network, 
+                             childcare,
+                             start = 0, 
+                             end = 1000, 
+                             step = 50, 
+                             width = 50, 
+                             nsim = 50, 
+                             resolution = 50,
+                             verbose = FALSE, 
+                             conf_int = 0.05)
+```
+
+```{r}
+kfun_childcare$plotk
+```
