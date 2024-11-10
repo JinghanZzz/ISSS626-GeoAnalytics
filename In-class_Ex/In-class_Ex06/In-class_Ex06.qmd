@@ -1,0 +1,168 @@
+---
+title: "In-class_Ex06"
+format: html
+editor: visual
+---
+
+
+```{r}
+pacman::p_load(sf, sfdep,tmap, plotly, tidyverse)
+```
+#01 Read in Data
+```{r}
+hunan <- st_read(dsn = "data/geospatial",
+        layer = "Hunan")
+```
+```{r}
+GDPPC <- read_csv("data/aspatial/hunan_GDPPC.csv")
+```
+
+#02 Create a Time Series Cube
+
+Space(X,Y) + Time(Z) , only attribute can change (for here is time)
+
+```{r}
+GDPPC_st <- spacetime(GDPPC, hunan, #spatial, attribute data
+                      .loc_col = "County",   #indicate this is spatial
+                      .time_col = "Year")   #indicate this one is time
+                                            #cannot use original time cause that's continuous
+                                            #convert day to integer or drop time,only keep ymd
+```
+
+Check if has been correctly transformed to space time cube
+```{r}
+is_spacetime_cube(GDPPC_st) 
+```
+
+#03 Computing Gi*
+
+##3.1 Deriving the spatial weights
+for Gi*, only distance method (inverse or fixed distance(threshold distance)) is applicable. proximity not applicable
+```{r}
+GDPPC_nb <- GDPPC_st %>%
+  activate("geometry") %>%
+  mutate(nb = include_self(
+          st_contiguity(geometry)),
+          wt = st_inverse_distance(nb, 
+                                  geometry, 
+                                  scale = 1, 
+                                  alpha = 1), #distance decay
+         .before = 1) %>%   # ?
+  set_nbs("nb") %>%     #之后就不能再sort了会乱
+  set_wts("wt")
+```
+
+```{r}
+gi_stars <- GDPPC_nb %>%
+  group_by (Year) %>%
+  mutate(gi_star= local_gstar_perm(
+    GDPPC, nb, wt)) %>%
+  tidyr::unnest(gi_star)
+```
+      
+
+##3.2 Mann-Kendall Test to individual sectors
+
+看单调性monotonic
+H0: No monotonic trend
+H1: Monotonic trend is present
+reject H0 if p value <0.05,
+then tau ranges between -1 ~ 1
+-1 decreasing series
+1 increasing series
+```{r}
+cbg <- gi_stars %>%
+  ungroup() %>%
+  filter(County == "Changsha") |>   #new R function ，就是filter， == %>%
+  select(County, Year, gi_star)
+```
+
+```{r}
+#save as a object through ggpolt
+# Plot the result using ggplot2
+ggplot(data = cbg,
+       aes(x = Year,
+           y = gi_star)) +
+  geom_line() +
+  theme_light()
+```
+
+##3.3 Interactive Mann-Kendall Plot
+make the ggplot interactive
+```{r}
+p<- ggplot(data = cbg,
+           aes(x=Year,
+               y= gi_star))+
+  geom_line() +
+  theme_light()
+
+ggplotly(p)
+```
+
+##3.4 Printing MK Test Report
+```{r}
+library(Kendall)
+cbg %>%
+  summarise(mk = list(unclass(
+    Kendall::MannKendall(gi_star)
+  )))%>%
+  tidyr::unnest_wider(mk)
+```
+##3.5 Easier way to replicate 3.1~3.5 MK Test county-wise
+tau:看monotonic的-1 单调递减，1单调递增
+约接近0correlation约小
+```{r}
+ehsa <- gi_stars %>%
+  group_by(County) %>%
+  summarise(mk = list(
+    unclass(
+      Kendall::MannKendall(gi_star)
+    ))) %>%
+  tidyr::unnest_wider(mk)
+
+head(ehsa)
+```
+
+#04 Performing Emerging Hotspot Analysis
+##4.1
+```{r}
+ehsa <- emerging_hotspot_analysis(
+  x = GDPPC_st,
+  .var = "GDPPC",
+  k = 1,     #现在和前一个时点的比较，类似t和t-1
+  nsim = 99  #模拟的次数
+)
+```
+
+##4.2 Visualising the distribution of EHSA classes
+```{r}
+ggplot(data = ehsa,
+       aes(x = classification))+
+  geom_bar()
+```
+
+##4.3 Visualising EHSA
+```{r}
+# Joining hunan and ehsa data
+hunan_ehsa <- hunan %>%
+  left_join(ehsa, by = join_by(County == location))
+```
+
+Oscilating & sporadic 都是有冷热
+但Oscilating是有规律和周期的
+sporadic 是偶然一下突然冷/热无规律，eg。大部分直接冷，偶发热
+```{r}
+# Filtering significant results and plotting using tmap
+ehsa_sig <- hunan_ehsa %>%
+  filter(p_value < 0.05)
+
+tmap_mode("plot")
+tm_shape(hunan_ehsa) +
+  tm_polygons() +
+  tm_borders(alpha = 0.5) +
+tm_shape(ehsa_sig) +
+  tm_fill("classification") +
+  tm_borders(alpha = 0.4)
+```
+
+ 
